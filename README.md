@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚀 Twit (Idea Engine)
 
-## Getting Started
+**Transform your raw thoughts into viral-ready content with AI-powered contextual intelligence.**
 
-First, run the development server:
+Twit is a sophisticated "Idea Engine" designed to bridge the gap between fragmented thoughts and polished social media content. Built with **Next.js 14**, **Supabase**, and **OpenAI**, it leverages vector similarity search to find connections between your ideas and generate high-context, engaging tweets.
 
+---
+
+## ✨ Key Features
+
+- **🧠 Contextual Generation**: Uses OpenAI's GPT-4o-mini to turn raw ideas into compelling tweets.
+- **🔍 Vector Similarity Search**: Powered by `pgvector` in Supabase to find related ideas and past successful tweets for better context.
+- **📁 Idea Vault**: A specialized storage system for managing your raw inspirations and generated drafts.
+- **📊 Profile Management**: Personalized settings to tailor the AI's "voice" to your unique style.
+- **⚡ Real-time Updates**: Seamless integration with Supabase for instant data synchronization.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: [Next.js 14 (App Router)](https://nextjs.org/)
+- **Database**: [Supabase](https://supabase.com/) (PostgreSQL + `pgvector`)
+- **AI Engine**: [OpenAI GPT-4o-mini](https://openai.com/)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Authentication**: [Supabase Auth](https://supabase.com/auth)
+
+---
+
+## 🏗️ Architecture
+
+Twit operates on a three-tier architecture:
+
+1.  **Ingestion**: Raw ideas are stored and indexed using OpenAI embeddings.
+2.  **Retrieval**: When generating content, the system performs a vector search to pull relevant context from your existing idea vault.
+3.  **Synthesis**: The AI merges the new idea with historical context to produce output that is consistent with your previous work but fresh in perspective.
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Node.js 18+
+- A Supabase account
+- An OpenAI API key
+
+### 2. Installation
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/enggayushTiwari/twit.git
+cd twit
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Environment Setup
+Create a `.env.local` file in the root directory and add the following:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+OPENAI_API_KEY=your_openai_key
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Database Setup
+Run the SQL migration files provided in the root directory to set up the schema:
+- `supabase_schema.sql` (Base tables)
+- `supabase_schema_phase2.sql` (Embeddings & Functions)
+- `supabase_schema_profile.sql` (User Profiles)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 5. Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to see the magic.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 📄 License
+MIT © [Ayush Tiwari](https://github.com/enggayushTiwari)
