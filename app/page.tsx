@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { saveIdeaWithEmbedding } from './actions';
 import { Brain, Plus, Loader2, CheckCircle2 } from 'lucide-react';
 import UrlIngester from './UrlIngester';
+import PersonaVault from './PersonaVault';
 
 export default function Home() {
   const [idea, setIdea] = useState('');
@@ -127,6 +128,11 @@ export default function Home() {
         {/* URL Ingestion */}
         <section className="mb-12">
           <UrlIngester />
+        </section>
+
+        {/* Persona Ingestion */}
+        <section className="mb-12">
+          <PersonaVault />
         </section>
 
         {/* Capture Area */}

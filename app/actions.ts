@@ -390,3 +390,63 @@ export async function saveUrlAsIdea(url: string) {
         };
     }
 }
+
+export async function analyzeAndSavePersona(handle: string, tweets: string[]) {
+    if (!handle || !tweets || tweets.length < 3 || tweets.length > 5) {
+        return { success: false, error: 'Please provide a handle and 3 to 5 tweets.' };
+    }
+
+    try {
+        const systemPrompt = `You are a master copywriter and brand strategist. 
+Analyze the provided tweets from a specific creator and reverse-engineer their voice. 
+Output a concise, highly specific 'Voice Framework' detailing:
+1. Sentence Length & Structure (e.g., punchy, academic, run-on style)
+2. Tone & Atmosphere (e.g., cynical, hyper-optimistic, ironic)
+3. Vocabulary Choices (e.g., slang used, specific jargon, simple vs. complex words)
+4. Formatting Quirks (e.g., all lowercase, use of emojis, specific spacing, list structures)
+
+Be precise and objective. Do not provide generic advice.`;
+
+        const tweetContent = tweets.map((t, i) => `Tweet ${i + 1}: ${t}`).join('\n\n');
+
+        const completionResponse = await ai.models.generateContent({
+            model: 'gemini-3.1-pro',
+            contents: `Analyze the voice of @${handle} based on these golden tweets:\n\n${tweetContent}`,
+            config: {
+                systemInstruction: systemPrompt,
+                temperature: 0.7,
+            }
+        });
+
+        const voiceProfile = completionResponse.text || '';
+
+        if (!voiceProfile) {
+            return { success: false, error: 'Failed to generate voice profile.' };
+        }
+
+        // Save to Supabase
+        const { error: insertError } = await supabase
+            .from('creator_personas')
+            .insert([
+                {
+                    handle: handle,
+                    golden_tweets: tweets,
+                    ai_voice_profile: voiceProfile
+                }
+            ]);
+
+        if (insertError) {
+            console.error('Supabase Persona Save Error:', insertError);
+            return { success: false, error: 'Failed to save persona to database.' };
+        }
+
+        return { success: true, data: voiceProfile };
+
+    } catch (err: any) {
+        console.error('Analyze and Save Persona Action Error:', err);
+        return {
+            success: false,
+            error: err.message || 'An unexpected error occurred while analyzing the persona.'
+        };
+    }
+}
