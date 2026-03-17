@@ -56,72 +56,74 @@ export async function POST(req: Request) {
         }
 
         // 2. Find 3 highly related ideas using the match_ideas RPC
-        const { data: relatedIdeas, error: matchError } = await fallbackMatchIdeas(supabase, randomIdea.embedding, 3);
-
-        // In production, you would call your RPC function like this once you know pgvector is enabled properly:
-        /*
         const { data: relatedIdeas, error: matchError } = await supabase.rpc('match_ideas', {
-          query_embedding: randomIdea.embedding,
-          match_threshold: 0.70, // 0 to 1, higher is stricter
-          match_count: 3
+            query_embedding: randomIdea.embedding,
+            match_threshold: 0.1,
+            match_count: 3
         });
-        */
 
         if (matchError) {
             console.error('[3/7] FAILED: Match ideas error:', matchError);
             return NextResponse.json(
-                { error: 'Failed to find related ideas.' },
+                { error: 'Failed to find related ideas via RPC.' },
                 { status: 500 }
             );
         }
-        console.log(`[3/7] Found ${relatedIdeas?.length || 0} related ideas.`);
+        console.log(`[3/7] Found ${relatedIdeas?.length || 0} related ideas via Supabase RPC.`);
 
-        // 3. Fetch the last 15 tweets for anti-repetition
+        // 3. Fetch the last 20 tweets (including PENDING) for anti-repetition
         const { data: recentTweets, error: fetchTweetsError } = await supabase
             .from('generated_tweets')
             .select('content')
+            .in('status', ['APPROVED', 'PUBLISHED', 'PENDING'])
             .order('created_at', { ascending: false })
-            .limit(15);
+            .limit(20);
 
         if (fetchTweetsError) {
             console.error('[4/7] WARNING: Fetch Tweets Error:', fetchTweetsError);
         }
-        console.log(`[4/7] Fetched ${recentTweets?.length || 0} recent tweets for anti-repetition.`);
+        console.log(`[4/7] Fetched ${recentTweets?.length || 0} approved/published tweets for anti-repetition.`);
 
-        // 4. Build Context for Gemini
+        // 4. Build Context for Gemini with XML Structure
         const contextIdeas = relatedIdeas?.map((item: any) => item.content).join('\n---\n') || randomIdea.content;
         const pastTweets = recentTweets?.map((t: any) => t.content).join('\n') || 'None';
 
-        const basePrompt = `You are an expert ghostwriter and brand architect for the user. 
-Your goal is to help them build their specific brand image. 
-Their desired public perception is: ${profile?.desired_perception || 'Thoughtful and professional'}. 
-They are writing specifically for this audience: ${profile?.target_audience || 'A general professional audience'}. 
-You must strictly obey these tone guardrails: ${profile?.tone_guardrails || 'Clear, concise, and engaging'}. `;
+        const systemPrompt = `You are a world-class Critical Thinker and Brand Strategist.
+Your MISSION: Analyze the provided source material, extract the core philosophical or technical thesis, and craft a single, high-performance tweet that offers a fresh, original perspective.
 
-        let instructionPrompt = '';
+<persona_guardrails>
+- DESIRED PUBLIC PERCEPTION: ${profile?.desired_perception || 'Thoughtful, technical, and forward-thinking'}
+- TARGET AUDIENCE: ${profile?.target_audience || 'Founders, engineers, and product builders'}
+- TONE: Professional, sharp, and insight-dense. Avoid marketing fluff.
+- STYLE: Minimalist. High signal-to-noise ratio. No "AI-isms".
+- NEGATIVE CONSTRAINTS: 
+    - NEVER use "delve", "crucial", "landscape", "tapestry", or "harness".
+    - NEVER use space-related metaphors.
+    - DO NOT mention "Mars", "galaxies", "planets", "stars", or "the universe".
+    - No hashtags and no emojis.
+</persona_guardrails>
 
-        if (randomIdea.type === 'project_log') {
-            instructionPrompt = `The provided context is a raw technical log or project dump from the user. Extract a hard-earned lesson, a "build-in-public" update, or an architectural insight from this dump. Show, don't just tell, that the user is actively building complex systems. Keep it under 280 characters and obey the tone guardrails.`;
-        } else {
-            instructionPrompt = `Filter the provided raw ideas through this architecture to write a single, sharp tweet.
-Keep it under 280 characters. Do not sound like an AI.
-DO NOT use emojis, hashtags, or words like "delve", "crucial", or "landscape".`;
-        }
+<recent_content_history_DO_NOT_REPEAT>
+${pastTweets}
+</recent_content_history_DO_NOT_REPEAT>
 
-        const systemPrompt = `${basePrompt}
-${instructionPrompt}
-
-Knowledge Context (Base your tweet loosely on these core ideas):
+<source_material>
+Type: ${randomIdea.type || 'standard idea'}
+Core Context:
 ${contextIdeas}
+</source_material>
 
-Do Not Repeat Context (Ensure your tweet sounds distinct from these recent thoughts):
-${pastTweets}`;
+CRITICAL INSTRUCTIONS:
+1. ANALYSIS FIRST: Identify the primary insight in the <source_material>. Do not just rephrase it; synthesize it.
+2. ZERO MODE COLLAPSE: You must NEVER reuse the exact phrasing, hook, or ending from the <recent_content_history_DO_NOT_REPEAT>. If your drafted tweet looks similar to history, delete it and start over.
+3. ORIGINALITY: Focus on systems, startups, and distribution. If the idea is philosophical, apply it to modern building or engineering.
+4. BREVITY: Absolute maximum of 280 characters. If it exceeds this limit, it is a failure. Be punchy.`;
 
         // 5. Call Gemini to generate the tweet
-        console.log('[5/7] Calling Gemini 2.5 Flash...');
+        console.log('[5/7] Calling Gemini 3.1 Pro with structured prompt...');
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: 'Generate the tweet now.',
+            model: 'gemini-3.1-pro-preview',
+            contents: 'Proceed with generation based on the provided instructions.',
             config: {
                 systemInstruction: systemPrompt,
                 temperature: 0.8,
@@ -171,34 +173,3 @@ ${pastTweets}`;
     }
 }
 
-// Fallback manual cosine similarity for the MVP in case pgvector gives users trouble early on
-async function fallbackMatchIdeas(supabase: any, queryEmbedding: number[], limit: number) {
-    const { data: allIdeas, error } = await supabase.from('raw_ideas').select('id, content, embedding');
-    if (error) return { data: null, error };
-    if (!allIdeas) return { data: [], error: null };
-
-    const scoredIdeas = allIdeas
-        .filter((idea: any) => idea.embedding)
-        .map((idea: any) => {
-            const embeddingArray = JSON.parse(idea.embedding) as number[]; // Ensure it's a JS array
-            const similarity = cosineSimilarity(queryEmbedding, embeddingArray);
-            return { ...idea, similarity };
-        })
-        .sort((a: any, b: any) => b.similarity - a.similarity)
-        .slice(0, limit);
-
-    return { data: scoredIdeas, error: null };
-}
-
-function cosineSimilarity(vecA: number[], vecB: number[]) {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}

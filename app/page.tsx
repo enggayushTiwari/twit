@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { saveIdeaWithEmbedding } from './actions';
 import { Brain, Plus, Loader2, CheckCircle2 } from 'lucide-react';
+import UrlIngester from './UrlIngester';
 
 export default function Home() {
   const [idea, setIdea] = useState('');
@@ -12,6 +13,8 @@ export default function Home() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [thinking, setThinking] = useState(false);
   const [thinkError, setThinkError] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
   const [addedSuggestions, setAddedSuggestions] = useState<Set<number>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -26,6 +29,8 @@ export default function Home() {
   const handleSave = async () => {
     if (!idea.trim()) return;
 
+    setStatus('idle');
+    setMessage('');
     setIsSaving(true);
 
     const result = await saveIdeaWithEmbedding(idea, activeTab);
@@ -33,9 +38,17 @@ export default function Home() {
     setIsSaving(false);
 
     if (!result.success) {
-      alert(`Error saving idea: ${result.error}`);
+      setStatus('error');
+      setMessage(result.error || 'Error saving idea.');
     } else {
+      setStatus('success');
+      setMessage('Idea saved to vault.');
       setIdea(''); // Clear the input after successful save
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setStatus('idle');
+        setMessage('');
+      }, 3000);
     }
   };
 
@@ -111,6 +124,11 @@ export default function Home() {
           </div>
         </header>
 
+        {/* URL Ingestion */}
+        <section className="mb-12">
+          <UrlIngester />
+        </section>
+
         {/* Capture Area */}
         <main className="flex-1 flex flex-col justify-center">
           <textarea
@@ -127,6 +145,17 @@ export default function Home() {
             autoFocus
           />
         </main>
+
+        {/* Status Message */}
+        {status !== 'idle' && (
+          <div className={`mb-4 flex items-start gap-2 text-xs font-medium px-4 py-3 rounded-lg border animate-in fade-in slide-in-from-bottom-1 ${
+            status === 'success' 
+              ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' 
+              : 'bg-red-500/5 border-red-500/20 text-red-400'
+          }`}>
+            <span className="leading-relaxed">{message}</span>
+          </div>
+        )}
 
         {/* Footer Actions */}
         <footer className="mt-8 flex items-center justify-between border-t border-zinc-900 pt-6">

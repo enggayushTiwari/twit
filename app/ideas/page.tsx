@@ -3,12 +3,17 @@
 import { useState, useEffect } from 'react';
 import { getAllIdeas } from '../actions';
 import Link from 'next/link';
-import { Loader2, Lightbulb } from 'lucide-react';
+import { Loader2, Lightbulb, Link2 } from 'lucide-react';
 
 type Idea = {
     id: string;
     content: string;
+    type?: string;
     created_at: string;
+    metadata?: {
+        source_url?: string;
+        title?: string;
+    } | null;
 };
 
 export default function IdeasPage() {
@@ -75,21 +80,42 @@ export default function IdeasPage() {
                         className="group bg-zinc-950 border border-zinc-900 rounded-2xl p-5 transition-all hover:border-zinc-800"
                     >
                         <div className="flex items-start gap-3">
-                            <Lightbulb className="w-4 h-4 text-amber-500/60 mt-1 shrink-0" />
-                            <p className="text-zinc-300 leading-relaxed text-[15px]">
-                                {idea.content}
-                            </p>
+                            <div className="mt-1 shrink-0">
+                                {idea.type === 'url' ? (
+                                    <Link2 className="w-4 h-4 text-indigo-400/60" />
+                                ) : (
+                                    <Lightbulb className="w-4 h-4 text-amber-500/60" />
+                                )}
+                            </div>
+                            <div className="space-y-1">
+                                {idea.type === 'url' && idea.metadata?.title && (
+                                    <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                                        {idea.metadata.title}
+                                    </h4>
+                                )}
+                                <p className="text-zinc-300 leading-relaxed text-[15px]">
+                                    {idea.content}
+                                </p>
+                            </div>
                         </div>
-                        <div className="mt-3 pl-7">
+                        <div className="mt-4 pl-7 flex items-center gap-4">
                             <span className="text-xs font-mono text-zinc-700">
                                 {new Date(idea.created_at).toLocaleDateString('en-US', {
                                     month: 'short',
                                     day: 'numeric',
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
+                                    year: 'numeric'
                                 })}
                             </span>
+                            {idea.type === 'url' && idea.metadata?.source_url && (
+                                <a
+                                    href={idea.metadata.source_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] font-medium text-indigo-400/50 hover:text-indigo-300 transition-colors flex items-center gap-1"
+                                >
+                                    Source &rarr;
+                                </a>
+                            )}
                         </div>
                     </div>
                 ))}

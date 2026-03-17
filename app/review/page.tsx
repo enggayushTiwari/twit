@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getPendingTweets, getTweetHistory, updateTweetStatus } from '../actions';
 import Link from 'next/link';
-import { Check, X, Loader2, Sparkles, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Check, X, Loader2, Sparkles, Clock, CheckCircle2, XCircle, Twitter, ExternalLink } from 'lucide-react';
 
 type Tweet = {
     id: string;
@@ -22,6 +22,8 @@ export default function ReviewDashboard() {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [publishingId, setPublishingId] = useState<string | null>(null);
+    const [toast, setToast] = useState<string | null>(null);
 
     async function loadTweets() {
         const result = await getPendingTweets();
@@ -80,7 +82,10 @@ export default function ReviewDashboard() {
     };
 
     const handleUpdate = async (id: string, newContent: string, newStatus: string) => {
-        setTweets((prev) => prev.filter((t) => t.id !== id));
+        // If we're rejecting/approving from pending, remove from view
+        if (activeTab === 'pending') {
+            setTweets((prev) => prev.filter((t) => t.id !== id));
+        }
 
         const result = await updateTweetStatus(id, newContent, newStatus);
 
@@ -88,11 +93,40 @@ export default function ReviewDashboard() {
             console.error('Failed to update tweet status:', result.error);
             alert(`Error: ${result.error}`);
         } else {
-            // Refresh history if we're on it, so the new item appears
-            if (activeTab === 'history') {
-                loadHistory();
+            // Refresh history if we're on it or if we just moved something there
+            loadHistory();
+            if (activeTab === 'pending') {
+                loadTweets();
             }
         }
+    };
+
+    const handlePublish = async (tweet: Tweet) => {
+        setPublishingId(tweet.id);
+        setToast('Opening X...');
+
+        // 1. Construct Web Intent URL
+        const encodedText = encodeURIComponent(tweet.content);
+        const intentUrl = `https://twitter.com/intent/tweet?text=${encodedText}`;
+
+        // 2. Open in new tab
+        window.open(intentUrl, '_blank');
+
+        // 3. Update status in Supabase
+        const result = await updateTweetStatus(tweet.id, tweet.content, 'PUBLISHED');
+
+        if (result.success) {
+            // Update local state for immediate UI feedback
+            setHistoryTweets(prev => 
+                prev.map(t => t.id === tweet.id ? { ...t, status: 'PUBLISHED' } : t)
+            );
+        }
+
+        // 4. Cleanup feedback after a delay
+        setTimeout(() => {
+            setToast(null);
+            setPublishingId(null);
+        }, 3000);
     };
 
     const handleTextChange = (id: string, newContent: string) => {
@@ -258,12 +292,16 @@ export default function ReviewDashboard() {
                                     {tweet.content}
                                 </p>
                                 <span
-                                    className={`shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${tweet.status === 'APPROVED'
-                                        ? 'bg-emerald-500/10 text-emerald-400'
-                                        : 'bg-red-500/10 text-red-400'
+                                    className={`shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${tweet.status === 'PUBLISHED'
+                                        ? 'bg-blue-500/10 text-blue-400'
+                                        : tweet.status === 'APPROVED'
+                                            ? 'bg-emerald-500/10 text-emerald-400'
+                                            : 'bg-red-500/10 text-red-400'
                                         }`}
                                 >
-                                    {tweet.status === 'APPROVED' ? (
+                                    {tweet.status === 'PUBLISHED' ? (
+                                        <ExternalLink className="w-3 h-3" />
+                                    ) : tweet.status === 'APPROVED' ? (
                                         <CheckCircle2 className="w-3 h-3" />
                                     ) : (
                                         <XCircle className="w-3 h-3" />
@@ -271,7 +309,7 @@ export default function ReviewDashboard() {
                                     {tweet.status}
                                 </span>
                             </div>
-                            <div className="mt-3">
+                            <div className="mt-4 flex items-center justify-between">
                                 <span className="text-xs font-mono text-zinc-700">
                                     {new Date(tweet.created_at).toLocaleDateString('en-US', {
                                         month: 'short',
@@ -281,9 +319,28 @@ export default function ReviewDashboard() {
                                         minute: '2-digit',
                                     })}
                                 </span>
+
+                                {tweet.status === 'APPROVED' && (
+                                    <button
+                                        onClick={() => handlePublish(tweet)}
+                                        disabled={publishingId === tweet.id}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-100 text-zinc-950 text-xs font-bold hover:bg-white transition-all disabled:opacity-50"
+                                    >
+                                        <Twitter className="w-3.5 h-3.5 fill-current" />
+                                        Publish to X
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* Toast Notification */}
+            {toast && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-zinc-100 text-zinc-950 px-6 py-3 rounded-full text-sm font-bold shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300 z-50 flex items-center gap-3">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {toast}
                 </div>
             )}
         </div>

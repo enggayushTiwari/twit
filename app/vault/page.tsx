@@ -3,19 +3,33 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getRawIdeas, deleteRawIdea } from '../actions';
-import { Loader2, Trash2, Database } from 'lucide-react';
+import { Loader2, Trash2, Database, ExternalLink, Link2 } from 'lucide-react';
 
 type RawIdea = {
     id: string;
     content: string;
     type: string;
     created_at: string;
+    metadata?: {
+        source_url?: string;
+        title?: string;
+    } | null;
 };
 
 export default function VaultPage() {
     const [ideas, setIdeas] = useState<RawIdea[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    const getDomain = (url?: string) => {
+        if (!url) return '';
+        try {
+            const domain = new URL(url).hostname;
+            return domain.replace('www.', '');
+        } catch (e) {
+            return url;
+        }
+    };
 
     useEffect(() => {
         async function fetchIdeas() {
@@ -107,12 +121,18 @@ export default function VaultPage() {
                                     <span className={`text-xs font-semibold px-2 py-1 rounded-full border flex items-center gap-1.5 ${
                                         idea.type === 'project_log' 
                                             ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
-                                            : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                                            : idea.type === 'url'
+                                                ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                                                : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                                     }`}>
                                         <div className={`w-1.5 h-1.5 rounded-full ${
-                                            idea.type === 'project_log' ? 'bg-amber-500' : 'bg-blue-500'
+                                            idea.type === 'project_log' 
+                                                ? 'bg-amber-500' 
+                                                : idea.type === 'url'
+                                                    ? 'bg-indigo-400'
+                                                    : 'bg-blue-500'
                                         }`} />
-                                        {idea.type === 'project_log' ? 'Project Log' : 'Idea'}
+                                        {idea.type === 'project_log' ? 'Project Log' : idea.type === 'url' ? 'Web Source' : 'Idea'}
                                     </span>
                                     
                                     <button
@@ -123,19 +143,39 @@ export default function VaultPage() {
                                         <Trash2 className="w-4 h-4" />
                                     </button>
                                 </div>
+
+                                {idea.type === 'url' && idea.metadata?.title && (
+                                    <h4 className="text-sm font-medium text-zinc-400 mb-2 line-clamp-1">
+                                        {idea.metadata.title}
+                                    </h4>
+                                )}
                                 
-                                <p className="text-[15px] leading-relaxed text-zinc-300 flex-1 whitespace-pre-wrap">
+                                <p className="text-[15px] leading-relaxed text-zinc-300 flex-1 whitespace-pre-wrap line-clamp-[8]">
                                     {idea.content}
                                 </p>
 
                                 <div className="mt-6 pt-4 border-t border-zinc-900/50 flex items-center justify-between">
-                                    <span className="text-xs font-mono text-zinc-600">
-                                        {new Date(idea.created_at).toLocaleDateString(undefined, {
-                                            month: 'short',
-                                            day: 'numeric',
-                                            year: 'numeric'
-                                        })}
-                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-xs font-mono text-zinc-600">
+                                            {new Date(idea.created_at).toLocaleDateString(undefined, {
+                                                month: 'short',
+                                                day: 'numeric',
+                                                year: 'numeric'
+                                            })}
+                                        </span>
+                                        
+                                        {idea.type === 'url' && idea.metadata?.source_url && (
+                                            <a 
+                                                href={idea.metadata.source_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-1 text-[11px] font-medium text-indigo-400/70 hover:text-indigo-300 transition-colors"
+                                            >
+                                                <ExternalLink className="w-3 h-3" />
+                                                {getDomain(idea.metadata.source_url)}
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}

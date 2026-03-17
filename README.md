@@ -2,7 +2,7 @@
 
 **Transform your raw thoughts into viral-ready content with AI-powered contextual intelligence.**
 
-Twit is a sophisticated "Idea Engine" designed to bridge the gap between fragmented thoughts and polished social media content. Built with **Next.js 14**, **Supabase**, and **OpenAI**, it leverages vector similarity search to find connections between your ideas and generate high-context, engaging tweets.
+Twit is a sophisticated "Idea Engine" designed to bridge the gap between fragmented thoughts and polished social media content. Built with **Next.js 16**, **Supabase**, and **Google Gemini**, it leverages vector similarity search to find connections between your ideas and generate high-context, engaging tweets.
 
 ---
 
@@ -18,10 +18,10 @@ Twit is a sophisticated "Idea Engine" designed to bridge the gap between fragmen
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [Next.js 14 (App Router)](https://nextjs.org/)
+- **Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
 - **Database**: [Supabase](https://supabase.com/) (PostgreSQL + `pgvector`)
-- **AI Engine**: [OpenAI GPT-4o-mini](https://openai.com/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **AI Engine**: [Google Gemini 3.1 Pro](https://deepmind.google/technologies/gemini/) (via Google GenAI)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
 - **Icons**: [Lucide React](https://lucide.dev/)
 - **Authentication**: [Supabase Auth](https://supabase.com/auth)
 
@@ -51,12 +51,11 @@ cd twit
 npm install
 ```
 
-### 3. Environment Setup
 Create a `.env.local` file in the root directory and add the following:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-OPENAI_API_KEY=your_openai_key
+GOOGLE_API_KEY=your_google_genai_key
 ```
 
 ### 4. Database Setup
