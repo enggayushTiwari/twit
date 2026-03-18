@@ -32,7 +32,7 @@ Idea Engine is a personal capture-to-content system. You feed it raw ideas, proj
 
 ## Database
 
-Use `supabase_schema_canonical.sql` as the fresh-setup source of truth. The older SQL files in the repo are legacy migration history and may conflict with each other.
+Use `supabase_schema_canonical.sql` as the only Supabase setup script. The older conflicting migration fragments have been removed so the repo has a single database source of truth.
 
 ## Notes
 
