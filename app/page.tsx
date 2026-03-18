@@ -6,6 +6,7 @@ import { saveIdeaWithEmbedding } from './actions';
 import { Brain, Plus, Loader2, CheckCircle2 } from 'lucide-react';
 import UrlIngester from './UrlIngester';
 import PersonaVault from './PersonaVault';
+import { getErrorMessage } from '@/utils/errors';
 
 export default function Home() {
   const [idea, setIdea] = useState('');
@@ -68,8 +69,8 @@ export default function Home() {
       }
 
       setSuggestions(data.suggestions);
-    } catch (err: any) {
-      setThinkError(err.message);
+    } catch (err: unknown) {
+      setThinkError(getErrorMessage(err, 'Failed to brainstorm'));
     } finally {
       setThinking(false);
     }

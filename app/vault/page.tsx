@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getRawIdeas, deleteRawIdea } from '../actions';
-import { Loader2, Trash2, Database, ExternalLink, Link2 } from 'lucide-react';
+import { Loader2, Trash2, Database, ExternalLink } from 'lucide-react';
 
 type RawIdea = {
     id: string;
@@ -26,7 +26,7 @@ export default function VaultPage() {
         try {
             const domain = new URL(url).hostname;
             return domain.replace('www.', '');
-        } catch (e) {
+        } catch {
             return url;
         }
     };
@@ -157,7 +157,7 @@ export default function VaultPage() {
                                 <div className="mt-6 pt-4 border-t border-zinc-900/50 flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <span className="text-xs font-mono text-zinc-600">
-                                            {new Date(idea.created_at).toLocaleDateString(undefined, {
+                                            {new Date(idea.created_at).toLocaleDateString('en-US', {
                                                 month: 'short',
                                                 day: 'numeric',
                                                 year: 'numeric'

@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
+import { getErrorMessage } from '@/utils/errors';
 
 // Initialize Gemini
 const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_API_KEY,
 });
 
-export async function POST(req: Request) {
+type RawIdeaContext = {
+    content: string;
+    type: string;
+};
+
+export async function POST() {
     try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
         const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
@@ -36,7 +42,9 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Your vault is empty. Deposit some ideas first to give the Co-Thinker some context!' }, { status: 400 });
         }
 
-        const formattedContext = recentInputs.map((item) => `[${item.type.toUpperCase()}] ${item.content}`).join('\n---\n');
+        const formattedContext = (recentInputs as RawIdeaContext[])
+            .map((item) => `[${item.type.toUpperCase()}] ${item.content}`)
+            .join('\n---\n');
 
         const systemPrompt = `You are a brilliant intellectual sparring partner and brand architect for the user. 
 Read the user's recent thoughts and project logs provided below. 
@@ -62,14 +70,14 @@ Each string must be a sharp, single-paragraph idea that the user could copy into
         try {
             // Remove potential markdown code blocks if the AI stubbornly adds them
             const cleanText = rawText.replace(/```json\n?|\n?```/g, '').trim();
-            suggestions = JSON.parse(cleanText);
+            const parsed: unknown = JSON.parse(cleanText);
             
-            if (!Array.isArray(suggestions)) {
+            if (!Array.isArray(parsed)) {
                 throw new Error("Parsed output is not an array");
             }
             
             // Ensure exactly 3 strings
-            suggestions = suggestions.slice(0, 3).map(String);
+            suggestions = parsed.slice(0, 3).map(String);
         } catch (parseError) {
             console.error('Failed to parse Gemini output:', rawText, parseError);
             return NextResponse.json({ error: 'Failed to parse AI response. Please try again.' }, { status: 500 });
@@ -77,8 +85,8 @@ Each string must be a sharp, single-paragraph idea that the user could copy into
 
         return NextResponse.json({ suggestions });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Brainstorm API Error:', error);
-        return NextResponse.json({ error: error.message || 'An unexpected error occurred.' }, { status: 500 });
+        return NextResponse.json({ error: getErrorMessage(error, 'An unexpected error occurred.') }, { status: 500 });
     }
 }

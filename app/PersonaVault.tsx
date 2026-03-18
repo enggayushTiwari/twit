@@ -68,7 +68,7 @@ export default function PersonaVault() {
                 </div>
                 <div>
                     <h3 className="text-lg font-semibold text-zinc-100">Train New Voice</h3>
-                    <p className="text-sm text-zinc-500">Reverse-engineer a creator's persona from golden examples.</p>
+                    <p className="text-sm text-zinc-500">Reverse-engineer a creator&apos;s persona from golden examples. The most recently saved voice becomes an optional reference during draft generation.</p>
                 </div>
             </div>
 

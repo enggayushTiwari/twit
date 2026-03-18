@@ -7,10 +7,9 @@ import * as cheerio from 'cheerio';
 export async function scrapeUrl(url: string): Promise<{ success: boolean; content: string; title?: string; error?: string }> {
     try {
         // 1. Validate URL
-        let validUrl: URL;
         try {
-            validUrl = new URL(url);
-        } catch (e) {
+            new URL(url);
+        } catch {
             return { success: false, content: '', error: 'Invalid URL provided.' };
         }
 
@@ -75,12 +74,12 @@ export async function scrapeUrl(url: string): Promise<{ success: boolean; conten
             content: cleanedContent
         };
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Scraper Error:', error);
         return {
             success: false,
             content: '',
-            error: error.message || 'An unexpected error occurred while scraping.'
+            error: error instanceof Error ? error.message : 'An unexpected error occurred while scraping.'
         };
     }
 }

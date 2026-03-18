@@ -1,11 +1,21 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
+import { buildGenerationSystemPrompt } from '@/utils/generation';
+import { getErrorMessage } from '@/utils/errors';
 
 // Prevent Next.js from prerendering this route statically at build time
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
+type IdeaMatch = {
+    content: string;
+};
+
+type TweetContentRow = {
+    content: string;
+};
+
+export async function POST() {
     try {
         console.log('\n====== GENERATION ENGINE START ======');
 
@@ -30,6 +40,19 @@ export async function POST(req: Request) {
             console.error('[1.5/7] WARNING: Failed to fetch profile:', profileError);
         } else {
             console.log('[1.5/7] Fetched user profile successfully.');
+        }
+
+        const { data: creatorPersona, error: creatorPersonaError } = await supabase
+            .from('creator_personas')
+            .select('handle, ai_voice_profile')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (creatorPersonaError) {
+            console.error('[1.75/7] WARNING: Failed to fetch creator persona:', creatorPersonaError);
+        } else if (creatorPersona) {
+            console.log(`[1.75/7] Using latest creator voice reference from @${creatorPersona.handle}.`);
         }
         // 1. Fetch one random idea
         // For MVP: Fetch all ideas and pick one randomly in JS
@@ -75,49 +98,26 @@ export async function POST(req: Request) {
         const { data: recentTweets, error: fetchTweetsError } = await supabase
             .from('generated_tweets')
             .select('content')
-            .in('status', ['APPROVED', 'PUBLISHED', 'PENDING'])
+            .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
             .order('created_at', { ascending: false })
             .limit(20);
 
         if (fetchTweetsError) {
             console.error('[4/7] WARNING: Fetch Tweets Error:', fetchTweetsError);
         }
-        console.log(`[4/7] Fetched ${recentTweets?.length || 0} approved/published tweets for anti-repetition.`);
+        console.log(`[4/7] Fetched ${recentTweets?.length || 0} recent drafts for anti-repetition.`);
 
         // 4. Build Context for Gemini with XML Structure
-        const contextIdeas = relatedIdeas?.map((item: any) => item.content).join('\n---\n') || randomIdea.content;
-        const pastTweets = recentTweets?.map((t: any) => t.content).join('\n') || 'None';
+        const contextIdeas = (relatedIdeas as IdeaMatch[] | null)?.map((item) => item.content).join('\n---\n') || randomIdea.content;
+        const pastTweets = (recentTweets as TweetContentRow[] | null)?.map((tweet) => tweet.content).join('\n') || 'None';
 
-        const systemPrompt = `You are a world-class Critical Thinker and Brand Strategist.
-Your MISSION: Analyze the provided source material, extract the core philosophical or technical thesis, and craft a single, high-performance tweet that offers a fresh, original perspective.
-
-<persona_guardrails>
-- DESIRED PUBLIC PERCEPTION: ${profile?.desired_perception || 'Thoughtful, technical, and forward-thinking'}
-- TARGET AUDIENCE: ${profile?.target_audience || 'Founders, engineers, and product builders'}
-- TONE: Professional, sharp, and insight-dense. Avoid marketing fluff.
-- STYLE: Minimalist. High signal-to-noise ratio. No "AI-isms".
-- NEGATIVE CONSTRAINTS: 
-    - NEVER use "delve", "crucial", "landscape", "tapestry", or "harness".
-    - NEVER use space-related metaphors.
-    - DO NOT mention "Mars", "galaxies", "planets", "stars", or "the universe".
-    - No hashtags and no emojis.
-</persona_guardrails>
-
-<recent_content_history_DO_NOT_REPEAT>
-${pastTweets}
-</recent_content_history_DO_NOT_REPEAT>
-
-<source_material>
-Type: ${randomIdea.type || 'standard idea'}
-Core Context:
-${contextIdeas}
-</source_material>
-
-CRITICAL INSTRUCTIONS:
-1. ANALYSIS FIRST: Identify the primary insight in the <source_material>. Do not just rephrase it; synthesize it.
-2. ZERO MODE COLLAPSE: You must NEVER reuse the exact phrasing, hook, or ending from the <recent_content_history_DO_NOT_REPEAT>. If your drafted tweet looks similar to history, delete it and start over.
-3. ORIGINALITY: Focus on systems, startups, and distribution. If the idea is philosophical, apply it to modern building or engineering.
-4. BREVITY: Absolute maximum of 280 characters. If it exceeds this limit, it is a failure. Be punchy.`;
+        const systemPrompt = buildGenerationSystemPrompt({
+            profile,
+            creatorPersona,
+            sourceType: randomIdea.type,
+            contextIdeas,
+            pastTweets,
+        });
 
         // 5. Call Gemini to generate the tweet
         console.log('[5/7] Calling Gemini 3.1 Pro with structured prompt...');
@@ -164,10 +164,10 @@ CRITICAL INSTRUCTIONS:
         console.log('====== GENERATION ENGINE COMPLETE ======\n');
         return NextResponse.json({ success: true, tweet: insertedTweet });
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Generation API Error:', err);
         return NextResponse.json(
-            { error: err.message || 'An unexpected error occurred.' },
+            { error: getErrorMessage(err, 'An unexpected error occurred.') },
             { status: 500 }
         );
     }

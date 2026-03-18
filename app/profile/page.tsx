@@ -100,7 +100,7 @@ export default function ProfilePage() {
                     </div>
                 </div>
                 <p className="text-zinc-500 mt-3 leading-relaxed">
-                    Define the psychological baseline. The generation engine will filter all raw ideas through this specific lens.
+                    Define the psychological baseline. The generation engine uses this lens first, then optionally blends in the latest trained creator voice as a reference.
                 </p>
             </header>
 
@@ -144,7 +144,7 @@ export default function ProfilePage() {
                     <label className="block">
                         <span className="text-sm font-medium text-zinc-300">Tone Guardrails</span>
                         <span className="block text-xs text-zinc-600 mt-1">
-                            What are your absolute "Do Nots" for formatting and style?
+                            What are your absolute &quot;Do Nots&quot; for formatting and style?
                         </span>
                     </label>
                     <textarea
@@ -195,8 +195,8 @@ export default function ProfilePage() {
                             The Mirror <span className="text-zinc-500 text-sm font-normal">(Persona Analysis)</span>
                         </h2>
                         <p className="text-zinc-500 text-sm mt-2 leading-relaxed">
-                            Analyze your approved tweets to see what public persona you are actively projecting. 
-                            Requires at least 3 approved tweets.
+                            Analyze your approved or opened drafts to see what public persona you are actively projecting. 
+                            Requires at least 3 approved or opened drafts.
                         </p>
                     </div>
 

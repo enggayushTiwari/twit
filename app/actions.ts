@@ -4,6 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { scrapeUrl } from '../utils/scraper';
 import { revalidatePath } from 'next/cache';
+import { getErrorMessage } from '../utils/errors';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../utils/ai-config';
 
 // Initialize Google GenAI
 const ai = new GoogleGenAI({
@@ -44,14 +46,14 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
 
         // 1. Generate Embedding using Google Gen AI
         const embeddingResponse = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
+            model: EMBEDDING_MODEL,
             contents: ideaText,
         });
 
         const embedding = embeddingResponse.embeddings?.[0]?.values;
 
-        if (!embedding || embedding.length !== 3072) {
-            console.error(`Unexpected embedding dimension: ${embedding?.length || 0}. Expected 3072.`);
+        if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
+            console.error(`Unexpected embedding dimension: ${embedding?.length || 0}. Expected ${EMBEDDING_DIMENSIONS}.`);
             return { success: false, error: 'Failed to generate correct embedding dimensions.' };
         }
 
@@ -74,11 +76,11 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
         revalidatePath('/vault');
         return { success: true };
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Action Error:', err);
         return {
             success: false,
-            error: err.message || 'An unexpected error occurred while saving.'
+            error: getErrorMessage(err, 'An unexpected error occurred while saving.')
         };
     }
 }
@@ -97,9 +99,9 @@ export async function getPendingTweets() {
         }
 
         return { success: true, data: tweets, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Get Pending Tweets Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -116,9 +118,9 @@ export async function updateTweetStatus(id: string, newContent: string, newStatu
         }
 
         return { success: true };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Update Tweet Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.' };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.') };
     }
 }
 
@@ -135,9 +137,9 @@ export async function getAllIdeas() {
         }
 
         return { success: true, data: ideas, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Get All Ideas Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -155,9 +157,9 @@ export async function getTweetHistory() {
         }
 
         return { success: true, data: tweets, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Get Tweet History Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -166,7 +168,7 @@ export async function analyzePersona() {
         const { data: tweets, error: tweetsError } = await supabase
             .from('generated_tweets')
             .select('content')
-            .eq('status', 'APPROVED');
+            .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED']);
 
         if (tweetsError) {
             console.error('Fetch Approved Tweets Error:', tweetsError);
@@ -174,7 +176,7 @@ export async function analyzePersona() {
         }
 
         if (!tweets || tweets.length < 3) {
-            return { success: false, error: 'Not enough data to analyze persona. Approve more tweets first.', data: null };
+            return { success: false, error: 'Not enough data to analyze persona. Approve or open more drafts first.', data: null };
         }
 
         const tweetContents = tweets.map((t) => t.content).join('\n---\n');
@@ -197,9 +199,9 @@ export async function analyzePersona() {
         }
 
         return { success: true, data: analysis, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Analyze Persona Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -217,9 +219,9 @@ export async function getProfile() {
         }
 
         return { success: true, data: profile, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Get Profile Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -263,9 +265,9 @@ export async function updateProfile(data: {
         }
 
         return { success: true };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Update Profile Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.' };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.') };
     }
 }
 
@@ -282,9 +284,9 @@ export async function getRawIdeas() {
         }
 
         return { success: true, data: ideas, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Get Raw Ideas Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.', data: null };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
 }
 
@@ -308,9 +310,9 @@ export async function deleteRawIdea(id: string) {
 
         revalidatePath('/vault');
         return { success: true };
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Delete Raw Idea Action Error:', err);
-        return { success: false, error: err.message || 'An unexpected error occurred.' };
+        return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.') };
     }
 }
 
@@ -348,15 +350,15 @@ export async function saveUrlAsIdea(url: string) {
 
         // 2. Generate Embedding using Google Gen AI
         const embeddingResponse = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
+            model: EMBEDDING_MODEL,
             contents: content,
         });
 
         const embedding = embeddingResponse.embeddings?.[0]?.values;
 
-        if (!embedding || embedding.length !== 3072) {
-            console.error(`Unexpected embedding dimension for URL: ${embedding?.length || 0}. Expected 3072.`);
-            throw new Error(`Failed to generate correct embedding dimensions (got ${embedding?.length || 0}, expected 3072).`);
+        if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
+            console.error(`Unexpected embedding dimension for URL: ${embedding?.length || 0}. Expected ${EMBEDDING_DIMENSIONS}.`);
+            throw new Error(`Failed to generate correct embedding dimensions (got ${embedding?.length || 0}, expected ${EMBEDDING_DIMENSIONS}).`);
         }
 
         // 3. Insert into Supabase
@@ -382,11 +384,11 @@ export async function saveUrlAsIdea(url: string) {
         revalidatePath('/vault');
         return { success: true, title: title };
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Save URL Action Error:', err);
         return {
             success: false,
-            error: err.message || 'An unexpected error occurred while processing the URL.'
+            error: getErrorMessage(err, 'An unexpected error occurred while processing the URL.')
         };
     }
 }
@@ -397,6 +399,8 @@ export async function analyzeAndSavePersona(handle: string, tweets: string[]) {
     }
 
     try {
+        const normalizedHandle = handle.replace(/^@+/, '').trim();
+
         const systemPrompt = `You are a master copywriter and brand strategist. 
 Analyze the provided tweets from a specific creator and reverse-engineer their voice. 
 Output a concise, highly specific 'Voice Framework' detailing:
@@ -411,7 +415,7 @@ Be precise and objective. Do not provide generic advice.`;
 
         const completionResponse = await ai.models.generateContent({
             model: 'gemini-3.1-pro',
-            contents: `Analyze the voice of @${handle} based on these golden tweets:\n\n${tweetContent}`,
+            contents: `Analyze the voice of @${normalizedHandle} based on these golden tweets:\n\n${tweetContent}`,
             config: {
                 systemInstruction: systemPrompt,
                 temperature: 0.7,
@@ -429,7 +433,7 @@ Be precise and objective. Do not provide generic advice.`;
             .from('creator_personas')
             .insert([
                 {
-                    handle: handle,
+                    handle: normalizedHandle,
                     golden_tweets: tweets,
                     ai_voice_profile: voiceProfile
                 }
@@ -442,11 +446,11 @@ Be precise and objective. Do not provide generic advice.`;
 
         return { success: true, data: voiceProfile };
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('Analyze and Save Persona Action Error:', err);
         return {
             success: false,
-            error: err.message || 'An unexpected error occurred while analyzing the persona.'
+            error: getErrorMessage(err, 'An unexpected error occurred while analyzing the persona.')
         };
     }
 }

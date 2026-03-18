@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { getPendingTweets, getTweetHistory, updateTweetStatus } from '../actions';
 import Link from 'next/link';
 import { Check, X, Loader2, Sparkles, Clock, CheckCircle2, XCircle, Twitter, ExternalLink } from 'lucide-react';
+import { getReviewStatusLabel, isReadyToPost } from '@/utils/review-status';
 
 type Tweet = {
     id: string;
@@ -54,7 +55,7 @@ export default function ReviewDashboard() {
         if (activeTab === 'history' && historyTweets.length === 0) {
             loadHistory();
         }
-    }, [activeTab]);
+    }, [activeTab, historyTweets.length]);
 
     const handleGenerate = async () => {
         setIsGenerating(true);
@@ -74,8 +75,9 @@ export default function ReviewDashboard() {
             }
 
             await loadTweets();
-        } catch (err: any) {
-            alert(`Generation Error: ${err.message}`);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Generation failed.';
+            alert(`Generation Error: ${message}`);
         } finally {
             setIsGenerating(false);
         }
@@ -103,7 +105,7 @@ export default function ReviewDashboard() {
 
     const handlePublish = async (tweet: Tweet) => {
         setPublishingId(tweet.id);
-        setToast('Opening X...');
+        setToast('Opened X composer.');
 
         // 1. Construct Web Intent URL
         const encodedText = encodeURIComponent(tweet.content);
@@ -113,12 +115,12 @@ export default function ReviewDashboard() {
         window.open(intentUrl, '_blank');
 
         // 3. Update status in Supabase
-        const result = await updateTweetStatus(tweet.id, tweet.content, 'PUBLISHED');
+        const result = await updateTweetStatus(tweet.id, tweet.content, 'OPENED_IN_X');
 
         if (result.success) {
             // Update local state for immediate UI feedback
             setHistoryTweets(prev => 
-                prev.map(t => t.id === tweet.id ? { ...t, status: 'PUBLISHED' } : t)
+                prev.map(t => t.id === tweet.id ? { ...t, status: 'OPENED_IN_X' } : t)
             );
         }
 
@@ -292,21 +294,21 @@ export default function ReviewDashboard() {
                                     {tweet.content}
                                 </p>
                                 <span
-                                    className={`shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${tweet.status === 'PUBLISHED'
+                                    className={`shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED'
                                         ? 'bg-blue-500/10 text-blue-400'
                                         : tweet.status === 'APPROVED'
                                             ? 'bg-emerald-500/10 text-emerald-400'
                                             : 'bg-red-500/10 text-red-400'
                                         }`}
                                 >
-                                    {tweet.status === 'PUBLISHED' ? (
+                                    {tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED' ? (
                                         <ExternalLink className="w-3 h-3" />
                                     ) : tweet.status === 'APPROVED' ? (
                                         <CheckCircle2 className="w-3 h-3" />
                                     ) : (
                                         <XCircle className="w-3 h-3" />
                                     )}
-                                    {tweet.status}
+                                    {getReviewStatusLabel(tweet.status)}
                                 </span>
                             </div>
                             <div className="mt-4 flex items-center justify-between">
@@ -320,14 +322,14 @@ export default function ReviewDashboard() {
                                     })}
                                 </span>
 
-                                {tweet.status === 'APPROVED' && (
+                                {isReadyToPost(tweet.status) && (
                                     <button
                                         onClick={() => handlePublish(tweet)}
                                         disabled={publishingId === tweet.id}
                                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-100 text-zinc-950 text-xs font-bold hover:bg-white transition-all disabled:opacity-50"
                                     >
                                         <Twitter className="w-3.5 h-3.5 fill-current" />
-                                        Publish to X
+                                        Open in X
                                     </button>
                                 )}
                             </div>
