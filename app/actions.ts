@@ -414,7 +414,7 @@ Be precise and objective. Do not provide generic advice.`;
         const tweetContent = tweets.map((t, i) => `Tweet ${i + 1}: ${t}`).join('\n\n');
 
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-pro',
+            model: 'gemini-3.1-pro-preview',
             contents: `Analyze the voice of @${normalizedHandle} based on these golden tweets:\n\n${tweetContent}`,
             config: {
                 systemInstruction: systemPrompt,
