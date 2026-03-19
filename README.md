@@ -1,40 +1,67 @@
 # Idea Engine
 
-Idea Engine is a personal capture-to-content system. You feed it raw ideas, project notes, and scraped URLs, define the public persona you want to project, and the app generates short-form drafts for review.
+Idea Engine is a **capture-to-content pipeline** that transforms raw thoughts, project notes, and web research into high-quality social media drafts. It leverages vector similarity search and large language models (Gemini) to ensure every draft is grounded in your personal knowledge base while adhering to your unique voice.
 
-## Product Loop
+## 🚀 End-to-End Workflow
 
-1. Capture an idea or project log.
-2. Expand the vault by scraping a URL.
-3. Define your own voice in the profile page.
-4. Optionally train on a creator voice from example tweets.
-5. Generate draft tweets from related vault context.
-6. Review, approve, reject, and open drafts in X.
-7. Analyze your approved or opened drafts in the Mirror.
+Idea Engine operates in a four-stage loop:
 
-## Core Features
+### 1. Capture (The Vault)
+The "Vault" is your personal knowledge base. You can ingest two types of data:
+- **Raw Ideas**: Quick text snippets or project logs.
+- **Web Research**: Provide a URL, and the system scrapes the lead text, cleans it, and saves it.
+- *How it works technicaly*: Every entry is automatically converted into a vector embedding using Google GenAI and stored in Supabase with `pgvector`.
 
-- Vault-backed idea capture with embeddings stored in Supabase.
-- URL ingestion that scrapes readable text into the same vault.
-- Persona settings for desired perception, audience, and tone guardrails.
-- Optional creator voice references based on saved voice frameworks.
-- Draft generation using Gemini plus vector similarity search.
-- Review queue for approve/reject/open-in-X decisions.
-- Persona analysis over approved or opened drafts.
+### 2. Persona Engineering
+Before generating, you define the "who" and "how":
+- **User Profile**: Set your desired perception (e.g., "authoritative technical leader"), target audience, and tone guardrails.
+- **Creator Personas**: "Clone" a specific creator's voice by providing their X handle and a few of their best tweets. Gemini analyzes these to create a detailed **Voice Framework** (sentence structure, vocabulary, formatting quirks).
 
-## Tech Stack
+### 3. Generation Engine
+The core of the app. It doesn't just "write a tweet"; it:
+1.  Picks or receives a raw idea.
+2.  Performs a **Vector Similarity Search** to find related context in your Vault.
+3.  Combines the idea, the context, your profile, and the optional creator voice.
+4.  Generates a draft using **Gemini 3.1 Pro**.
 
-- Next.js 16 App Router
-- React 19 and TypeScript
-- Supabase with `pgvector`
-- Google GenAI / Gemini
-- Tailwind CSS 4
+### 4. Review & Mirror
+- **Review Queue**: Approve, reject, or edit drafts. Approved drafts can be one-click opened in X (Twitter).
+- **The Mirror**: A psychological profiler that analyzes your *actual* output. It looks at your approved/published tweets and provides a brutal, objective breakdown of the persona you are projected to the public.
 
-## Database
+---
 
-Use `supabase_schema_canonical.sql` as the only Supabase setup script. The older conflicting migration fragments have been removed so the repo has a single database source of truth.
+## 🛠 Tech Stack
 
-## Notes
+- **Framework**: Next.js 16 (App Router)
+- **Database**: [Supabase](https://supabase.com/) (PostgreSQL + `pgvector`)
+- **AI Models**: Google [Gemini 3.1 Pro](https://deepmind.google/technologies/gemini/) (Generation & Analysis) & Text Embedding 004.
+- **Styling**: Tailwind CSS 4
+- **Scraping**: Cheerio
 
-- The app now treats opening the X composer as a manual handoff, not a confirmed publish.
-- The latest saved creator persona is used as an optional voice reference during generation.
+---
+
+## ⚙️ Setup
+
+1.  **Clone the repo** and install dependencies:
+    ```bash
+    npm install
+    ```
+2.  **Supabase Setup**:
+    - Use `supabase_schema_canonical.sql` to initialize your database. This sets up the `raw_ideas`, `generated_tweets`, `user_profile`, and `creator_personas` tables, along with the required vector match functions.
+3.  **Environment Variables**:
+    Create a `.env.local` file with:
+    ```env
+    NEXT_PUBLIC_SUPABASE_URL=your-project-url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+    GOOGLE_API_KEY=your-gemini-api-key
+    ```
+4.  **Run Dev Server**:
+    ```bash
+    npm run dev
+    ```
+
+## 📝 Database Notes
+
+The repository maintains a single source of truth for the database schema in `supabase_schema_canonical.sql`. Always refer to this file for the latest table structures and RPC functions.
+
