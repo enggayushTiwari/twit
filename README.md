@@ -9,24 +9,25 @@ Idea Engine operates in a four-stage loop:
 ### 1. Capture (The Vault)
 The "Vault" is your personal knowledge base. You can ingest two types of data:
 - **Raw Ideas**: Quick text snippets or project logs.
-- **Web Research**: Provide a URL, and the system scrapes the lead text, cleans it, and saves it.
-- *How it works technicaly*: Every entry is automatically converted into a vector embedding using Google GenAI and stored in Supabase with `pgvector`.
+- **Web Research**: Provide a URL, and the system scrapes the content, cleans it, and saves it.
+- **Fresh Inferences**: Upon capture, the system immediately generates "Fresh Inferences"—AI thoughts that expand on your idea or find adjacent concepts.
+- *How it works technicaly*: Entries are converted into high-dimensional vectors (3072 dimensions) using `gemini-embedding-001` and stored in Supabase with `pgvector`.
 
 ### 2. Persona Engineering
 Before generating, you define the "who" and "how":
-- **User Profile**: Set your desired perception (e.g., "authoritative technical leader"), target audience, and tone guardrails.
-- **Creator Personas**: "Clone" a specific creator's voice by providing their X handle and a few of their best tweets. Gemini analyzes these to create a detailed **Voice Framework** (sentence structure, vocabulary, formatting quirks).
+- **User Profile**: Set your desired perception, target audience, and tone guardrails in the Mind Model.
+- **Creator Personas**: "Clone" a specific creator's voice by providing their X handle and golden tweets. Gemini extracts a **Voice Framework** covering sentence structure, tone, and formatting quirks.
 
 ### 3. Generation Engine
-The core of the app. It doesn't just "write a tweet"; it:
+The core of the app. It:
 1.  Picks or receives a raw idea.
-2.  Performs a **Vector Similarity Search** to find related context in your Vault.
-3.  Combines the idea, the context, your profile, and the optional creator voice.
-4.  Generates a draft using **Gemini 3.1 Pro**.
+2.  Performs a **Vector Similarity Search** (3072-dim) to find related context in your Vault.
+3.  Combines the context, your profile, and the optional creator voice.
+4.  Generates drafts using **Gemini 3.1 Pro (Preview)**.
 
 ### 4. Review & Mirror
-- **Review Queue**: Approve, reject, or edit drafts. Approved drafts can be one-click opened in X (Twitter).
-- **The Mirror**: A psychological profiler that analyzes your *actual* output. It looks at your approved/published tweets and provides a brutal, objective breakdown of the persona you are projected to the public.
+- **Review Queue**: Approve, reject, or edit drafts.
+- **The Mirror**: A psychological profiler that analyzes your approved/published output to show you the persona you are *actually* projecting to the world.
 
 ---
 
@@ -34,8 +35,10 @@ The core of the app. It doesn't just "write a tweet"; it:
 
 - **Framework**: Next.js 16 (App Router)
 - **Database**: [Supabase](https://supabase.com/) (PostgreSQL + `pgvector`)
-- **AI Models**: Google [Gemini 3.1 Pro](https://deepmind.google/technologies/gemini/) (Generation & Analysis) & Text Embedding 004.
-- **Styling**: Tailwind CSS 4
+- **AI Models**: 
+    - **Generation & Analysis**: Gemini 3.1 Pro (Preview)
+    - **Embeddings**: gemini-embedding-001 (**3072 Dimensions**)
+- **Styling**: Vanilla CSS / Tailwind CSS 4
 - **Scraping**: Cheerio
 
 ---
@@ -47,7 +50,8 @@ The core of the app. It doesn't just "write a tweet"; it:
     npm install
     ```
 2.  **Supabase Setup**:
-    - Use `supabase_schema_canonical.sql` to initialize your database. This sets up the `raw_ideas`, `generated_tweets`, `user_profile`, and `creator_personas` tables, along with the required vector match functions.
+    - Use `supabase_schema_canonical.sql` to initialize your database. 
+    - **Note**: Ensure the `embedding` column is set to `vector(3072)` to match the latest Gemini embedding model.
 3.  **Environment Variables**:
     Create a `.env.local` file with:
     ```env
@@ -63,5 +67,5 @@ The core of the app. It doesn't just "write a tweet"; it:
 
 ## 📝 Database Notes
 
-The repository maintains a single source of truth for the database schema in `supabase_schema_canonical.sql`. Always refer to this file for the latest table structures and RPC functions.
+The repository maintains a single source of truth for the database schema in `supabase_schema_canonical.sql`. It includes the `match_ideas` RPC for vector similarity search.
 
