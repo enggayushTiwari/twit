@@ -1,0 +1,2 @@
+DEBUG: Embedding dimensions: 3072 Expected: 768
+INSERT ERROR: {"code":"22000","details":null,"hint":null,"message":"expected 3072 dimensions, not 768"}

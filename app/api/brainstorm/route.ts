@@ -55,7 +55,7 @@ Output EXACTLY AND ONLY a valid JSON array of strings, with NO markdown formatti
 Each string must be a sharp, single-paragraph idea that the user could copy into their vault.`;
 
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.1-pro-preview',
             contents: `Here is the user's recent vault context:\n\n${formattedContext}`,
             config: {
                 systemInstruction: systemPrompt,

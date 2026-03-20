@@ -1,3 +1,5 @@
+import type { MindModelEntry } from "./self-model";
+
 export type CreatorPersonaRecord = {
   handle: string;
   ai_voice_profile: string;
@@ -9,12 +11,21 @@ export type UserProfileRecord = {
   tone_guardrails?: string | null;
 } | null;
 
-type BuildGenerationPromptParams = {
+type BuildGenerationSystemPromptParams = {
   profile: UserProfileRecord;
   creatorPersona: CreatorPersonaRecord;
   sourceType?: string | null;
   contextIdeas: string;
   pastTweets: string;
+  confirmedEntries?: MindModelEntry[];
+  currentObsessions?: string[];
+  recentEventPovs?: string[];
+};
+
+type BuildCandidatePromptParams = {
+  seedIdea: string;
+  thesisCount?: number;
+  draftCount?: number;
 };
 
 function getProfileLine(value: string | null | undefined, fallback: string) {
@@ -33,13 +44,37 @@ function getCreatorVoiceSection(creatorPersona: CreatorPersonaRecord) {
   ].join("\n");
 }
 
+function formatMindModelEntries(entries: MindModelEntry[] | undefined) {
+  if (!entries || entries.length === 0) {
+    return "None";
+  }
+
+  return entries
+    .map(
+      (entry) =>
+        `[${entry.kind.toUpperCase()} | p${entry.priority} | c${entry.confidence.toFixed(2)}] ${entry.statement}`
+    )
+    .join("\n");
+}
+
+function formatStringList(items: string[] | undefined) {
+  if (!items || items.length === 0) {
+    return "None";
+  }
+
+  return items.join("\n");
+}
+
 export function buildGenerationSystemPrompt({
   profile,
   creatorPersona,
   sourceType,
   contextIdeas,
   pastTweets,
-}: BuildGenerationPromptParams) {
+  confirmedEntries,
+  currentObsessions,
+  recentEventPovs,
+}: BuildGenerationSystemPromptParams) {
   const desiredPerception = getProfileLine(
     profile?.desired_perception,
     "Thoughtful, technical, and forward-thinking"
@@ -53,8 +88,8 @@ export function buildGenerationSystemPrompt({
     "Professional, sharp, high signal-to-noise, no hashtags, no emojis, no hypey hooks."
   );
 
-  return `You are a world-class Critical Thinker and Brand Strategist.
-Your MISSION: Analyze the provided source material, extract the core philosophical or technical thesis, and craft a single, high-performance tweet that offers a fresh, original perspective.
+  return `You are a world-class Thought Modeler, Critical Thinker, and Brand Strategist.
+Your MISSION: generate tweet drafts that sound like the user would have written them, based on confirmed worldview, current obsessions, recent event POVs, and vault inspiration.
 
 <persona_guardrails>
 - DESIRED PUBLIC PERCEPTION: ${desiredPerception}
@@ -69,6 +104,18 @@ ${getCreatorVoiceSection(creatorPersona)}
   - No hashtags and no emojis.
 </persona_guardrails>
 
+<confirmed_worldview>
+${formatMindModelEntries(confirmedEntries)}
+</confirmed_worldview>
+
+<current_obsessions>
+${formatStringList(currentObsessions)}
+</current_obsessions>
+
+<recent_event_povs>
+${formatStringList(recentEventPovs)}
+</recent_event_povs>
+
 <recent_content_history_DO_NOT_REPEAT>
 ${pastTweets}
 </recent_content_history_DO_NOT_REPEAT>
@@ -80,9 +127,66 @@ ${contextIdeas}
 </source_material>
 
 CRITICAL INSTRUCTIONS:
-1. ANALYSIS FIRST: Identify the primary insight in the <source_material>. Do not just rephrase it; synthesize it.
-2. ZERO MODE COLLAPSE: You must NEVER reuse the exact phrasing, hook, or ending from the <recent_content_history_DO_NOT_REPEAT>. If your drafted tweet looks similar to history, delete it and start over.
-3. ORIGINALITY: Focus on systems, startups, and distribution. If the idea is philosophical, apply it to modern building or engineering.
-4. VOICE PRIORITY: The user's explicit profile beats the reference voice. The reference voice is optional seasoning, not the identity.
-5. BREVITY: Absolute maximum of 280 characters. If it exceeds this limit, it is a failure. Be punchy.`;
+1. The vault is inspiration, not copy. Never lift wording from source notes unless it already sounds like a final tweet.
+2. Start from worldview, not from phrasing. The tweet should sound like a belief-led conclusion the user would reach.
+3. If worldview and source notes conflict, worldview wins.
+4. Prefer mechanism, incentives, systems, distribution, leverage, tradeoffs, or timing over shallow commentary.
+5. ZERO MODE COLLAPSE: do not repeat recent tweet structure, hook, or ending.
+6. Every candidate must fit under 280 characters.
+7. Better to be specific and sharp than broad and safe.`;
+}
+
+export function buildCandidateGenerationPrompt({
+  seedIdea,
+  thesisCount = 4,
+  draftCount = 3,
+}: BuildCandidatePromptParams) {
+  return `Seed idea:
+${seedIdea}
+
+Return JSON only with this shape:
+{
+  "theses": ["...", "..."],
+  "candidates": [
+    {
+      "thesis": "...",
+      "draft": "...",
+      "why_it_fits": "..."
+    }
+  ]
+}
+
+Rules:
+- Generate ${thesisCount} theses and ${draftCount} tweet candidates.
+- Every thesis must be a distinct angle.
+- Every candidate draft must be under 280 characters.
+- "why_it_fits" should explain why the draft matches the user's worldview or taste, not why it sounds clever.`;
+}
+
+export function buildAuthenticityCriticPrompt(candidatesJson: string) {
+  return `You are the user's authenticity critic.
+Rank the tweet candidates by how likely they are to be tweets the user would genuinely write.
+
+Evaluate each candidate on:
+- worldview alignment
+- sharpness
+- specificity
+- non-generic phrasing
+- non-performative tone
+- distance from direct source-note copying
+
+Return JSON only:
+{
+  "selected_index": 0,
+  "ranked": [
+    {
+      "draft_index": 0,
+      "score": 91,
+      "reason": "..."
+    }
+  ]
+}
+
+Candidates:
+${candidatesJson}`;
 }

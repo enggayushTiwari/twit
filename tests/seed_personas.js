@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenAI } = require('@google/genai');
 require('dotenv').config({ path: '.env.local' });
@@ -56,7 +57,7 @@ Be precise and objective. Do not provide generic advice.`;
             console.log(`Generating voice profile for @${persona.handle}...`);
             const prompt = `Analyze the voice of @${persona.handle} based on these golden tweets:\n\n${tweetContent}`;
             const completionResponse = await ai.models.generateContent({
-                model: 'gemini-3.1-pro-preview',
+                model: 'gemini-1.5-flash',
                 contents: prompt,
                 config: {
                     systemInstruction: systemPrompt,
@@ -89,4 +90,3 @@ Be precise and objective. Do not provide generic advice.`;
 }
 
 seedPersonas();
-

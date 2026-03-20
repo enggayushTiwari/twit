@@ -1,0 +1,6 @@
+
+--- API Version: v1 ---
+
+--- API Version: v1beta ---
+Embedding Model: models/gemini-embedding-001, Actions: embedContent, countTextTokens, countTokens, asyncBatchEmbedContent
+Embedding Model: models/gemini-embedding-2-preview, Actions: embedContent, countTextTokens, countTokens, asyncBatchEmbedContent

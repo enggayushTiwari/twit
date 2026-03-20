@@ -1,350 +1,583 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getPendingTweets, getTweetHistory, updateTweetStatus } from '../actions';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Check, X, Loader2, Sparkles, Clock, CheckCircle2, XCircle, Twitter, ExternalLink } from 'lucide-react';
+import {
+  answerReflectionTurn,
+  getPendingTweets,
+  getReviewLearningState,
+  getTweetHistory,
+  skipReflectionTurn,
+  submitDraftDecision,
+} from '../actions';
+import ReflectionPromptCard from '../ReflectionPromptCard';
+import {
+  Check,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  Twitter,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { getFeedbackTagLabel, FEEDBACK_TAG_OPTIONS, type FeedbackTag, type ReflectionTurn } from '@/utils/self-model';
+import type { GeneratedTweetRecord } from '@/utils/self-model';
 import { getReviewStatusLabel, isReadyToPost } from '@/utils/review-status';
-
-type Tweet = {
-    id: string;
-    content: string;
-    status: string;
-    created_at: string;
-};
 
 type Tab = 'pending' | 'history';
 
+function getActionError(result: unknown, fallback: string) {
+  if (
+    result &&
+    typeof result === 'object' &&
+    'error' in result &&
+    typeof result.error === 'string' &&
+    result.error.trim()
+  ) {
+    return result.error;
+  }
+
+  return fallback;
+}
+
 export default function ReviewDashboard() {
-    const [activeTab, setActiveTab] = useState<Tab>('pending');
-    const [tweets, setTweets] = useState<Tweet[]>([]);
-    const [historyTweets, setHistoryTweets] = useState<Tweet[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [historyLoading, setHistoryLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [publishingId, setPublishingId] = useState<string | null>(null);
-    const [toast, setToast] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('pending');
+  const [tweets, setTweets] = useState<GeneratedTweetRecord[]>([]);
+  const [historyTweets, setHistoryTweets] = useState<GeneratedTweetRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [feedbackTagsById, setFeedbackTagsById] = useState<Record<string, FeedbackTag[]>>({});
+  const [feedbackNotesById, setFeedbackNotesById] = useState<Record<string, string>>({});
+  const [draftFeedbackReflection, setDraftFeedbackReflection] = useState<ReflectionTurn | null>(null);
 
-    async function loadTweets() {
-        const result = await getPendingTweets();
-        if (result.success && result.data) {
-            setTweets(result.data);
-        } else {
-            setError(result.error);
-        }
-        setLoading(false);
+  async function refreshPendingTweets() {
+    const result = await getPendingTweets();
+    if (result.success && result.data) {
+      setTweets(result.data);
+      setError(null);
+    } else {
+      setError(getActionError(result, 'Failed to load pending tweets.'));
     }
+  }
 
-    async function loadHistory() {
-        setHistoryLoading(true);
-        const result = await getTweetHistory();
-        if (result.success && result.data) {
-            setHistoryTweets(result.data);
-        } else {
-            setError(result.error);
-        }
-        setHistoryLoading(false);
+  async function refreshHistoryTweets() {
+    setHistoryLoading(true);
+    const result = await getTweetHistory();
+    if (result.success && result.data) {
+      setHistoryTweets(result.data);
+      setError(null);
+    } else {
+      setError(getActionError(result, 'Failed to load tweet history.'));
     }
+    setHistoryLoading(false);
+  }
 
-    useEffect(() => {
-        loadTweets();
-    }, []);
+  useEffect(() => {
+    async function loadInitialTweets() {
+      const [pendingResult, reviewLearningResult] = await Promise.all([
+        getPendingTweets(),
+        getReviewLearningState(),
+      ]);
 
-    useEffect(() => {
-        if (activeTab === 'history' && historyTweets.length === 0) {
-            loadHistory();
-        }
-    }, [activeTab, historyTweets.length]);
-
-    const handleGenerate = async () => {
-        setIsGenerating(true);
+      if (pendingResult.success && pendingResult.data) {
+        setTweets(pendingResult.data);
         setError(null);
+      } else {
+        setError(getActionError(pendingResult, 'Failed to load pending tweets.'));
+      }
 
-        try {
-            const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: '{}',
-            });
-
-            const data = await res.json();
-
-            if (!res.ok || !data.success) {
-                throw new Error(data.error || 'Generation failed.');
-            }
-
-            await loadTweets();
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Generation failed.';
-            alert(`Generation Error: ${message}`);
-        } finally {
-            setIsGenerating(false);
-        }
-    };
-
-    const handleUpdate = async (id: string, newContent: string, newStatus: string) => {
-        // If we're rejecting/approving from pending, remove from view
-        if (activeTab === 'pending') {
-            setTweets((prev) => prev.filter((t) => t.id !== id));
-        }
-
-        const result = await updateTweetStatus(id, newContent, newStatus);
-
-        if (!result.success) {
-            console.error('Failed to update tweet status:', result.error);
-            alert(`Error: ${result.error}`);
-        } else {
-            // Refresh history if we're on it or if we just moved something there
-            loadHistory();
-            if (activeTab === 'pending') {
-                loadTweets();
-            }
-        }
-    };
-
-    const handlePublish = async (tweet: Tweet) => {
-        setPublishingId(tweet.id);
-        setToast('Opened X composer.');
-
-        // 1. Construct Web Intent URL
-        const encodedText = encodeURIComponent(tweet.content);
-        const intentUrl = `https://twitter.com/intent/tweet?text=${encodedText}`;
-
-        // 2. Open in new tab
-        window.open(intentUrl, '_blank');
-
-        // 3. Update status in Supabase
-        const result = await updateTweetStatus(tweet.id, tweet.content, 'OPENED_IN_X');
-
-        if (result.success) {
-            // Update local state for immediate UI feedback
-            setHistoryTweets(prev => 
-                prev.map(t => t.id === tweet.id ? { ...t, status: 'OPENED_IN_X' } : t)
-            );
-        }
-
-        // 4. Cleanup feedback after a delay
-        setTimeout(() => {
-            setToast(null);
-            setPublishingId(null);
-        }, 3000);
-    };
-
-    const handleTextChange = (id: string, newContent: string) => {
-        setTweets((prev) =>
-            prev.map((t) => (t.id === id ? { ...t, content: newContent } : t))
-        );
-    };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-[#050505] text-zinc-100 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-zinc-600" />
-            </div>
-        );
+      if (reviewLearningResult.success && reviewLearningResult.data) {
+        setDraftFeedbackReflection(reviewLearningResult.data.pendingFeedback);
+      }
+      setLoading(false);
     }
 
-    return (
-        <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col p-6 sm:p-12">
-            <header className="max-w-3xl border-b border-zinc-900 pb-8 mb-8">
-                <div className="flex items-center justify-between">
-                    <h1 className="text-2xl font-medium tracking-tight">Review Drafts</h1>
-                    <div className="flex items-center gap-4">
-                        <Link href="/vault" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            Knowledge Vault
-                        </Link>
-                        <Link href="/profile" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            Define Persona
-                        </Link>
-                        <Link href="/" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            &larr; Back to Capture
-                        </Link>
-                    </div>
-                </div>
+    void loadInitialTweets();
+  }, []);
 
-                {/* Tabs */}
-                <div className="flex items-center gap-1 mt-5 bg-zinc-900/50 rounded-lg p-1 w-fit">
-                    <button
-                        onClick={() => setActiveTab('pending')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'pending'
-                            ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300'
-                            }`}
-                    >
-                        <Clock className="w-3.5 h-3.5" />
-                        Pending Queue
-                        {tweets.length > 0 && (
-                            <span className="ml-1 bg-violet-500/20 text-violet-300 text-xs px-2 py-0.5 rounded-full">
-                                {tweets.length}
-                            </span>
-                        )}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('history')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'history'
-                            ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300'
-                            }`}
-                    >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        History
-                        {historyTweets.length > 0 && (
-                            <span className="ml-1 bg-zinc-700/50 text-zinc-400 text-xs px-2 py-0.5 rounded-full">
-                                {historyTweets.length}
-                            </span>
-                        )}
-                    </button>
-                </div>
+  useEffect(() => {
+    if (activeTab !== 'history' || historyTweets.length > 0) {
+      return;
+    }
 
-                {/* Generate button — only show on pending tab */}
-                {activeTab === 'pending' && (
-                    <button
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
-                        className={`mt-5 group relative flex items-center gap-2.5 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-300 disabled:cursor-not-allowed overflow-hidden border ${isGenerating
-                            ? 'bg-violet-500/[0.08] border-violet-500/15 text-zinc-400'
-                            : 'bg-gradient-to-br from-violet-500/15 to-blue-500/15 border-violet-500/30 text-violet-300 hover:from-violet-500/25 hover:to-blue-500/25'
-                            }`}
-                    >
-                        <Sparkles className={`w-4 h-4 ${isGenerating ? 'hidden' : ''}`} />
-                        <Loader2 className={`w-4 h-4 animate-spin ${isGenerating ? '' : 'hidden'}`} />
-                        {isGenerating
-                            ? 'Generating... (This takes a few seconds)'
-                            : 'Generate New Draft'}
-                    </button>
-                )}
-            </header>
+    async function loadHistoryTweets() {
+      setHistoryLoading(true);
+      const result = await getTweetHistory();
+      if (result.success && result.data) {
+        setHistoryTweets(result.data);
+        setError(null);
+      } else {
+        setError(getActionError(result, 'Failed to load tweet history.'));
+      }
+      setHistoryLoading(false);
+    }
 
-            {error && (
-                <div className="bg-red-950/30 text-red-500 p-4 rounded-md mb-8 max-w-3xl border border-red-900/50 text-sm">
-                    {error}
-                </div>
-            )}
+    void loadHistoryTweets();
+  }, [activeTab, historyTweets.length]);
 
-            {/* ====== PENDING QUEUE ====== */}
-            {activeTab === 'pending' && (
-                <div className="max-w-3xl space-y-6">
-                    {tweets.length === 0 && !error && (
-                        <div className="text-zinc-600 text-center py-20 border border-zinc-900 border-dashed rounded-xl">
-                            No pending tweets at the moment. Click &quot;Generate New Draft&quot; above to create one!
-                        </div>
-                    )}
+  async function handleGenerate() {
+    setIsGenerating(true);
+    setError(null);
 
-                    {tweets.map((tweet) => (
-                        <div
-                            key={tweet.id}
-                            className="group bg-zinc-950 border border-zinc-900 rounded-2xl p-6 transition-all hover:border-zinc-800"
-                        >
-                            <textarea
-                                className="w-full bg-transparent text-lg text-zinc-200 outline-none resize-none leading-relaxed min-h-[100px] mb-4"
-                                value={tweet.content}
-                                onChange={(e) => handleTextChange(tweet.id, e.target.value)}
-                                spellCheck={false}
-                            />
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
 
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-mono text-zinc-600">
-                                    {tweet.content.length}/280
-                                </span>
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Generation failed.');
+      }
 
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        onClick={() => handleUpdate(tweet.id, tweet.content, 'REJECTED')}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition-colors"
-                                        title="Reject"
-                                    >
-                                        <X className="w-4 h-4" /> Reject
-                                    </button>
-                                    <button
-                                        onClick={() => handleUpdate(tweet.id, tweet.content, 'APPROVED')}
-                                        className="flex items-center gap-2 px-6 py-2 rounded-full bg-emerald-500/10 text-emerald-400 text-sm font-medium hover:bg-emerald-500 hover:text-white transition-colors"
-                                    >
-                                        <Check className="w-4 h-4" /> Approve
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+      await refreshPendingTweets();
+      setToast('Generated a thesis-ranked draft set.');
+      window.setTimeout(() => setToast(null), 2800);
+    } catch (generationError) {
+      const message =
+        generationError instanceof Error ? generationError.message : 'Generation failed.';
+      setError(message);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
 
-            {/* ====== HISTORY ====== */}
-            {activeTab === 'history' && (
-                <div className="max-w-3xl space-y-4">
-                    {historyLoading && (
-                        <div className="flex items-center justify-center py-20">
-                            <Loader2 className="w-6 h-6 animate-spin text-zinc-600" />
-                        </div>
-                    )}
+  function toggleFeedbackTag(tweetId: string, tag: FeedbackTag) {
+    setFeedbackTagsById((previous) => {
+      const current = previous[tweetId] || [];
+      const next = current.includes(tag)
+        ? current.filter((item) => item !== tag)
+        : [...current, tag];
+      return { ...previous, [tweetId]: next };
+    });
+  }
 
-                    {!historyLoading && historyTweets.length === 0 && !error && (
-                        <div className="text-zinc-600 text-center py-20 border border-zinc-900 border-dashed rounded-xl">
-                            No history yet. Approve or reject some tweets to see them here.
-                        </div>
-                    )}
-
-                    {!historyLoading && historyTweets.map((tweet) => (
-                        <div
-                            key={tweet.id}
-                            className="bg-zinc-950 border border-zinc-900 rounded-2xl p-5 transition-all hover:border-zinc-800"
-                        >
-                            <div className="flex items-start justify-between gap-4">
-                                <p className="text-[15px] text-zinc-300 leading-relaxed flex-1">
-                                    {tweet.content}
-                                </p>
-                                <span
-                                    className={`shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED'
-                                        ? 'bg-blue-500/10 text-blue-400'
-                                        : tweet.status === 'APPROVED'
-                                            ? 'bg-emerald-500/10 text-emerald-400'
-                                            : 'bg-red-500/10 text-red-400'
-                                        }`}
-                                >
-                                    {tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED' ? (
-                                        <ExternalLink className="w-3 h-3" />
-                                    ) : tweet.status === 'APPROVED' ? (
-                                        <CheckCircle2 className="w-3 h-3" />
-                                    ) : (
-                                        <XCircle className="w-3 h-3" />
-                                    )}
-                                    {getReviewStatusLabel(tweet.status)}
-                                </span>
-                            </div>
-                            <div className="mt-4 flex items-center justify-between">
-                                <span className="text-xs font-mono text-zinc-700">
-                                    {new Date(tweet.created_at).toLocaleDateString('en-US', {
-                                        month: 'short',
-                                        day: 'numeric',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                    })}
-                                </span>
-
-                                {isReadyToPost(tweet.status) && (
-                                    <button
-                                        onClick={() => handlePublish(tweet)}
-                                        disabled={publishingId === tweet.id}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-100 text-zinc-950 text-xs font-bold hover:bg-white transition-all disabled:opacity-50"
-                                    >
-                                        <Twitter className="w-3.5 h-3.5 fill-current" />
-                                        Open in X
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* Toast Notification */}
-            {toast && (
-                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-zinc-100 text-zinc-950 px-6 py-3 rounded-full text-sm font-bold shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300 z-50 flex items-center gap-3">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {toast}
-                </div>
-            )}
-        </div>
+  function updateDraftContent(tweetId: string, nextContent: string) {
+    setTweets((previous) =>
+      previous.map((tweet) => (tweet.id === tweetId ? { ...tweet, content: nextContent } : tweet))
     );
+  }
+
+  async function handleDecision(tweet: GeneratedTweetRecord, newStatus: 'APPROVED' | 'REJECTED' | 'OPENED_IN_X') {
+    const currentTweet = tweets.find((item) => item.id === tweet.id) || tweet;
+    const nextContent = currentTweet.content;
+    const feedbackTags = feedbackTagsById[tweet.id] || [];
+    const freeformNote = feedbackNotesById[tweet.id] || '';
+
+    setActiveActionId(tweet.id);
+    setError(null);
+
+    if (newStatus === 'OPENED_IN_X') {
+      const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(nextContent)}`;
+      window.open(intentUrl, '_blank');
+    }
+
+    const result = await submitDraftDecision({
+      id: tweet.id,
+      newContent: nextContent,
+      newStatus,
+      originalContent: tweet.content,
+      feedbackTags,
+      freeformNote,
+    });
+
+    setActiveActionId(null);
+
+    if (!result.success) {
+      setError(getActionError(result, 'Failed to save draft feedback.'));
+      return;
+    }
+
+    setTweets((previous) => previous.filter((item) => item.id !== tweet.id));
+    setFeedbackTagsById((previous) => ({ ...previous, [tweet.id]: [] }));
+    setFeedbackNotesById((previous) => ({ ...previous, [tweet.id]: '' }));
+
+    if ('reflection' in result && result.reflection) {
+      setDraftFeedbackReflection(result.reflection);
+    }
+
+    await refreshHistoryTweets();
+    setToast(
+      newStatus === 'OPENED_IN_X'
+        ? 'Opened in X and logged your feedback.'
+        : newStatus === 'APPROVED'
+        ? 'Draft approved and learned from.'
+        : 'Draft rejected and logged as a taste signal.'
+    );
+    window.setTimeout(() => setToast(null), 2800);
+  }
+
+  async function handleReflectionAnswer(answer: string) {
+    if (!draftFeedbackReflection) {
+      return;
+    }
+
+    const result = await answerReflectionTurn(draftFeedbackReflection.id, answer);
+    if (!result.success) {
+      throw new Error(getActionError(result, 'Failed to save reflection.'));
+    }
+
+    setDraftFeedbackReflection('nextReflection' in result ? result.nextReflection || null : null);
+  }
+
+  async function handleReflectionSkip() {
+    if (!draftFeedbackReflection) {
+      return;
+    }
+
+    const result = await skipReflectionTurn(draftFeedbackReflection.id);
+    if (!result.success) {
+      throw new Error(getActionError(result, 'Failed to skip reflection.'));
+    }
+
+    setDraftFeedbackReflection(null);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#050505] text-zinc-100">
+        <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#050505] p-6 text-zinc-100 sm:p-12">
+      <div className="mx-auto max-w-4xl">
+        <header className="border-b border-zinc-900 pb-8">
+          <div className="flex items-center justify-between gap-6">
+            <div>
+              <h1 className="text-2xl font-medium tracking-tight">Review Drafts</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-500">
+                Approvals, edits, rejections, and what felt off all feed back into the system as
+                taste signals.
+              </p>
+            </div>
+            <div className="flex items-center gap-4 text-sm font-medium">
+              <Link href="/vault" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                Knowledge Vault
+              </Link>
+              <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                Mind Model
+              </Link>
+              <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                &larr; Back to Capture
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-5 flex w-fit items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('pending')}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+                activeTab === 'pending'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Pending Queue
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('history')}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+                activeTab === 'history'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              History
+            </button>
+          </div>
+
+          {activeTab === 'pending' ? (
+            <button
+              type="button"
+              onClick={() => void handleGenerate()}
+              disabled={isGenerating}
+              className={`mt-5 inline-flex items-center gap-2.5 rounded-xl border px-6 py-3 text-sm font-semibold transition-all ${
+                isGenerating
+                  ? 'cursor-not-allowed border-violet-500/15 bg-violet-500/[0.08] text-zinc-400'
+                  : 'border-violet-500/30 bg-gradient-to-br from-violet-500/15 to-blue-500/15 text-violet-300 hover:from-violet-500/25 hover:to-blue-500/25'
+              }`}
+            >
+              {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {isGenerating ? 'Generating...' : 'Generate Thesis-Led Draft'}
+            </button>
+          ) : null}
+        </header>
+
+        {draftFeedbackReflection ? (
+          <section className="mt-8">
+            <ReflectionPromptCard
+              reflection={draftFeedbackReflection}
+              title="Review Follow-Up"
+              description="This is how the system learns why a draft was close, off, or not really yours."
+              submitLabel="Save Taste Signal"
+              onSubmit={handleReflectionAnswer}
+              onSkip={handleReflectionSkip}
+            />
+          </section>
+        ) : null}
+
+        {toast ? (
+          <div className="mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-400">
+            {toast}
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="mt-6 rounded-md border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-500">
+            {error}
+          </div>
+        ) : null}
+
+        {activeTab === 'pending' ? (
+          <div className="mt-8 space-y-6">
+            {tweets.length === 0 && !error ? (
+              <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
+                No pending tweets right now. Generate a new thesis-led draft to start the loop.
+              </div>
+            ) : null}
+
+            {tweets.map((tweet) => {
+              const feedbackTags = feedbackTagsById[tweet.id] || [];
+              const feedbackNote = feedbackNotesById[tweet.id] || '';
+              const isWorking = activeActionId === tweet.id;
+
+              return (
+                <div
+                  key={tweet.id}
+                  className="rounded-2xl border border-zinc-900 bg-zinc-950 p-6 transition-all hover:border-zinc-800"
+                >
+                  <textarea
+                    className="mb-4 min-h-[110px] w-full resize-none bg-transparent text-lg leading-relaxed text-zinc-200 outline-none"
+                    value={tweet.content}
+                    onChange={(event) => updateDraftContent(tweet.id, event.target.value)}
+                    spellCheck={false}
+                  />
+
+                  {tweet.rationale ? (
+                    <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Why This Fits
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
+                        {tweet.rationale}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {tweet.theses && tweet.theses.length > 0 ? (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Candidate Theses
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {tweet.theses.map((thesis) => (
+                          <span
+                            key={thesis}
+                            className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-400"
+                          >
+                            {thesis}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {tweet.alternates && tweet.alternates.length > 0 ? (
+                    <div className="mb-4 grid gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Alternates
+                      </p>
+                      {tweet.alternates.map((alternate, index) => (
+                        <div
+                          key={`${tweet.id}-alternate-${index}`}
+                          className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4"
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">
+                                {alternate.thesis}
+                              </p>
+                              <p className="mt-2 text-sm leading-relaxed text-zinc-300">
+                                {alternate.draft}
+                              </p>
+                              <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                                {alternate.why_it_fits}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => updateDraftContent(tweet.id, alternate.draft)}
+                              className="shrink-0 rounded-full border border-zinc-700 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-zinc-100"
+                            >
+                              Use This
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                      What felt off or right?
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {FEEDBACK_TAG_OPTIONS.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => toggleFeedbackTag(tweet.id, tag)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                            feedbackTags.includes(tag)
+                              ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                              : 'border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+                          }`}
+                        >
+                          {getFeedbackTagLabel(tag)}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={feedbackNote}
+                      onChange={(event) =>
+                        setFeedbackNotesById((previous) => ({
+                          ...previous,
+                          [tweet.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional note: what was off, what you tightened, what you would really say instead."
+                      className="mt-3 min-h-[90px] w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <span className="text-xs font-mono text-zinc-600">{tweet.content.length}/280</span>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleDecision(tweet, 'REJECTED')}
+                        disabled={isWorking}
+                        className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDecision(tweet, 'APPROVED')}
+                        disabled={isWorking}
+                        className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-6 py-2 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-8 space-y-4">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+              </div>
+            ) : null}
+
+            {!historyLoading && historyTweets.length === 0 && !error ? (
+              <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
+                No history yet. Approve, reject, or open some drafts in X to build the learning
+                trail.
+              </div>
+            ) : null}
+
+            {!historyLoading &&
+              historyTweets.map((tweet) => (
+                <div
+                  key={tweet.id}
+                  className="rounded-2xl border border-zinc-900 bg-zinc-950 p-5 transition-all hover:border-zinc-800"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-[15px] leading-relaxed text-zinc-300">{tweet.content}</p>
+                      {tweet.rationale ? (
+                        <p className="mt-3 text-sm leading-relaxed text-zinc-500">{tweet.rationale}</p>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
+                        tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED'
+                          ? 'bg-blue-500/10 text-blue-400'
+                          : tweet.status === 'APPROVED'
+                          ? 'bg-emerald-500/10 text-emerald-400'
+                          : 'bg-red-500/10 text-red-400'
+                      }`}
+                    >
+                      {tweet.status === 'OPENED_IN_X' || tweet.status === 'PUBLISHED' ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <ExternalLink className="h-3 w-3" />
+                          {getReviewStatusLabel(tweet.status)}
+                        </span>
+                      ) : tweet.status === 'APPROVED' ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {getReviewStatusLabel(tweet.status)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5">
+                          <XCircle className="h-3 w-3" />
+                          {getReviewStatusLabel(tweet.status)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-4">
+                    <span className="text-xs font-mono text-zinc-700">
+                      {new Date(tweet.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+
+                    {isReadyToPost(tweet.status) ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDecision(tweet, 'OPENED_IN_X')}
+                        disabled={activeActionId === tweet.id}
+                        className="flex items-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-xs font-bold text-zinc-950 transition-all hover:bg-white disabled:opacity-50"
+                      >
+                        {activeActionId === tweet.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Twitter className="h-3.5 w-3.5 fill-current" />
+                        )}
+                        Open in X
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
