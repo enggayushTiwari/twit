@@ -23,7 +23,7 @@ The core of the app. It:
 1.  Picks or receives a raw idea.
 2.  Performs a **Vector Similarity Search** (3072-dim) to find related context in your Vault.
 3.  Combines the context, your profile, and the optional creator voice.
-4.  Generates drafts using **Gemini 3.1 Pro (Preview)**.
+4.  Generates drafts using **Gemini 3 Pro (Preview)**.
 
 ### 4. Review & Mirror
 - **Review Queue**: Approve, reject, or edit drafts.
@@ -36,7 +36,7 @@ The core of the app. It:
 - **Framework**: Next.js 16 (App Router)
 - **Database**: [Supabase](https://supabase.com/) (PostgreSQL + `pgvector`)
 - **AI Models**: 
-    - **Generation & Analysis**: Gemini 3.1 Pro (Preview)
+    - **Generation & Analysis**: Gemini 3 Pro (Preview)
     - **Embeddings**: gemini-embedding-001 (**3072 Dimensions**)
 - **Styling**: Vanilla CSS / Tailwind CSS 4
 - **Scraping**: Cheerio

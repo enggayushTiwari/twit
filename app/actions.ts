@@ -3,7 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { revalidatePath } from 'next/cache';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../utils/ai-config';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, GENERATION_MODEL } from '../utils/ai-config';
 import { parseJsonResponse } from '../utils/ai-json';
 import { getErrorMessage } from '../utils/errors';
 import { scrapeUrl } from '../utils/scraper';
@@ -250,7 +250,7 @@ async function upsertSuggestedEntries(params: {
 
 async function extractCaptureIntelligence(content: string, type: string) {
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: `Content type: ${type}\n\nUser note:\n${content}`,
         config: {
             temperature: 0.3,
@@ -294,7 +294,7 @@ async function deriveEntriesFromReflection(params: {
     contextSummary: string;
 }) {
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: `Reflection mode: ${params.mode}\nPrompt: ${params.prompt}\nAnswer: ${params.answer}\nContext:\n${params.contextSummary}`,
         config: {
             temperature: 0.3,
@@ -328,7 +328,7 @@ async function buildBroadReflectionPromptFromContext(params: {
     confirmedEntries: MindModelEntry[];
 }): Promise<BroadReflectionPrompt> {
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: `Recent ideas:\n${params.recentIdeas.join('\n---\n') || 'None'}\n\nConfirmed worldview entries:\n${params.confirmedEntries
             .map((entry) => `[${entry.kind}] ${entry.statement}`)
             .join('\n') || 'None'}`,
@@ -363,7 +363,7 @@ Return JSON only:
 async function summarizeEventInput(input: EventCaptureInput) {
     const sourceBits = [input.headline?.trim(), input.sourceText?.trim()].filter(Boolean).join('\n\n');
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: sourceBits,
         config: {
             temperature: 0.2,
@@ -387,7 +387,7 @@ async function buildEventBroaderPrompt(params: {
     userTake: string;
 }): Promise<BroadReflectionPrompt> {
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: `Neutral summary:\n${params.sourceSummary}\n\nUser take:\n${params.userTake}`,
         config: {
             temperature: 0.4,
@@ -423,7 +423,7 @@ async function deriveEventReflection(params: {
     broaderAnswer: string;
 }) {
     const completionResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: GENERATION_MODEL,
         contents: `Neutral summary:\n${params.sourceSummary}\n\nUser take:\n${params.userTake}\n\nBroader reflection:\n${params.broaderAnswer}`,
         config: {
             temperature: 0.3,
@@ -818,7 +818,7 @@ export async function analyzePersona() {
 
         const tweetContents = tweets.map((tweet) => tweet.content).join('\n---\n');
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-pro-preview',
+            model: GENERATION_MODEL,
             contents: `Here are the tweets:\n${tweetContents}`,
             config: {
                 systemInstruction:
@@ -1007,7 +1007,7 @@ export async function analyzeAndSavePersona(handle: string, tweets: string[]) {
         const tweetContent = tweets.map((tweet, index) => `Tweet ${index + 1}: ${tweet}`).join('\n\n');
 
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-pro-preview',
+            model: GENERATION_MODEL,
             contents: `Analyze the voice of @${normalizedHandle} based on these golden tweets:\n\n${tweetContent}`,
             config: {
                 systemInstruction:

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config({ path: '.env.local' });
 
@@ -48,12 +49,12 @@ async function debugFetch() {
             if (typeof e === 'string') {
                 try {
                     e = JSON.parse(e);
-                } catch (p) {
+                } catch {
                     try {
                         // pgvector string format "[v1,v2,...]" might need cleanup
                         const cleaned = e.replace('[', '').replace(']', '').split(',').map(Number);
                         if (cleaned.length > 0 && !isNaN(cleaned[0])) e = cleaned;
-                    } catch (p2) {}
+                    } catch {}
                 }
             }
             return Array.isArray(e) && e.length > 0;

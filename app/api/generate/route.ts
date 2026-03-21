@@ -8,6 +8,7 @@ import {
 } from '@/utils/generation';
 import { getErrorMessage } from '@/utils/errors';
 import { parseJsonResponse } from '@/utils/ai-json';
+import { GENERATION_MODEL } from '@/utils/ai-config';
 import type {
   GenerationCandidate,
   GenerationDraftSet,
@@ -151,11 +152,11 @@ export async function POST() {
       .limit(1)
       .maybeSingle();
 
-    const { data: allIdeas, error: fetchIdeasError } = await supabase
+    const { data: allIdeas } = await supabase
       .from('raw_ideas')
       .select('id, content, embedding, type');
 
-    function ensureArray(val: any): number[] {
+    function ensureArray(val: unknown): number[] {
       if (Array.isArray(val)) return val;
       if (typeof val === 'string') {
         try {
@@ -243,7 +244,7 @@ export async function POST() {
     });
 
     const generationResponse = await ai.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
+      model: GENERATION_MODEL,
       contents: buildCandidateGenerationPrompt({ seedIdea: seedIdea.content }),
       config: {
         systemInstruction: systemPrompt,
@@ -266,7 +267,7 @@ export async function POST() {
     }
 
     const criticResponse = await ai.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
+      model: GENERATION_MODEL,
       contents: buildAuthenticityCriticPrompt(JSON.stringify(draftSet, null, 2)),
       config: {
         systemInstruction:

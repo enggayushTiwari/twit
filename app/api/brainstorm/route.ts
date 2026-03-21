@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { getErrorMessage } from '@/utils/errors';
+import { GENERATION_MODEL } from '@/utils/ai-config';
 
 // Initialize Gemini
 const ai = new GoogleGenAI({
@@ -55,7 +56,7 @@ Output EXACTLY AND ONLY a valid JSON array of strings, with NO markdown formatti
 Each string must be a sharp, single-paragraph idea that the user could copy into their vault.`;
 
         const completionResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-pro-preview',
+            model: GENERATION_MODEL,
             contents: `Here is the user's recent vault context:\n\n${formattedContext}`,
             config: {
                 systemInstruction: systemPrompt,

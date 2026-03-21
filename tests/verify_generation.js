@@ -53,7 +53,7 @@ Output ONLY the tweet content. No commentary.`;
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-3-pro-preview',
             contents: `Generate a tweet for this idea: ${randomIdea}`,
             config: {
                 systemInstruction: systemPrompt,

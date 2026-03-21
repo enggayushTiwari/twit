@@ -57,7 +57,7 @@ Be precise and objective. Do not provide generic advice.`;
             console.log(`Generating voice profile for @${persona.handle}...`);
             const prompt = `Analyze the voice of @${persona.handle} based on these golden tweets:\n\n${tweetContent}`;
             const completionResponse = await ai.models.generateContent({
-                model: 'gemini-1.5-flash',
+                model: 'gemini-3-pro-preview',
                 contents: prompt,
                 config: {
                     systemInstruction: systemPrompt,
