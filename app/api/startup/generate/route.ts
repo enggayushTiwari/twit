@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import {
-  buildAuthenticityCriticPrompt,
-  buildCandidateGenerationPrompt,
-  buildGenerationSystemPrompt,
+  buildStartupCandidateGenerationPrompt,
+  buildStartupCriticPrompt,
+  buildStartupGenerationSystemPrompt,
 } from '@/utils/generation';
 import { getErrorMessage } from '@/utils/errors';
 import { parseJsonResponse } from '@/utils/ai-json';
@@ -16,17 +16,23 @@ import type {
   RankedGenerationResult,
   TweetAlternate,
 } from '@/utils/self-model';
+import type { StartupProfile } from '@/utils/startup';
 
 export const dynamic = 'force-dynamic';
 
-type RawIdeaRow = {
+type StartupMemoryRow = {
   id: string;
   content: string;
+  kind: string;
+  metadata: {
+    communication_focus?: string;
+    suggested_points?: string[];
+    follow_up_answer?: string;
+  } | null;
   embedding: number[] | null;
-  type: string | null;
 };
 
-type IdeaMatch = {
+type StartupMemoryMatch = {
   content: string;
 };
 
@@ -34,22 +40,33 @@ type TweetContentRow = {
   content: string;
 };
 
-type ProfileRow = {
-  desired_perception?: string | null;
-  target_audience?: string | null;
-  tone_guardrails?: string | null;
-} | null;
-
-type CreatorPersonaRow = {
-  handle: string;
-  ai_voice_profile: string;
-} | null;
-
 type RankedCandidate = GenerationCandidate & {
   draftIndex: number;
   score: number;
   critiqueReason: string;
 };
+
+function ensureArray(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return value.map(Number).filter(Number.isFinite);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+    } catch {
+      return value
+        .replace('[', '')
+        .replace(']', '')
+        .split(',')
+        .map(Number)
+        .filter(Number.isFinite);
+    }
+  }
+
+  return [];
+}
 
 function normalizeDraftSet(rawDraftSet: GenerationDraftSet): GenerationDraftSet {
   return {
@@ -77,7 +94,9 @@ function normalizeRankedResult(rawRankedResult: RankedGenerationResult): RankedG
       ? rawRankedResult.ranked
           .map((item) => ({
             draft_index:
-              typeof item?.draft_index === 'number' ? item.draft_index : Number(item?.draft_index || 0),
+              typeof item?.draft_index === 'number'
+                ? item.draft_index
+                : Number(item?.draft_index || 0),
             score: typeof item?.score === 'number' ? item.score : Number(item?.score || 0),
             reason: String(item?.reason || '').trim(),
           }))
@@ -86,19 +105,32 @@ function normalizeRankedResult(rawRankedResult: RankedGenerationResult): RankedG
   };
 }
 
-function buildContextIdeas(seedIdea: string, relatedIdeas: IdeaMatch[] | null) {
-  const uniqueIdeas = new Set<string>();
-  uniqueIdeas.add(seedIdea.trim());
+function buildStartupContext(seedEntry: StartupMemoryRow, relatedEntries: StartupMemoryMatch[] | null) {
+  const blocks = new Set<string>();
+  const seedPoints = seedEntry.metadata?.suggested_points?.join('; ') || '';
+  const seedFocus = seedEntry.metadata?.communication_focus || '';
+  const seedFollowUp = seedEntry.metadata?.follow_up_answer || '';
 
-  for (const idea of relatedIdeas || []) {
-    const content = idea.content?.trim();
+  blocks.add(
+    [
+      `Startup memory seed (${seedEntry.kind}): ${seedEntry.content}`,
+      seedFocus ? `Communication focus: ${seedFocus}` : '',
+      seedPoints ? `Suggested points: ${seedPoints}` : '',
+      seedFollowUp ? `Founder clarification: ${seedFollowUp}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
+
+  for (const entry of relatedEntries || []) {
+    const content = entry.content?.trim();
     if (content) {
-      uniqueIdeas.add(content);
+      blocks.add(content);
     }
   }
 
-  return Array.from(uniqueIdeas)
-    .map((idea, index) => `Idea ${index + 1}: ${idea}`)
+  return Array.from(blocks)
+    .map((block, index) => `Startup Context ${index + 1}:\n${block}`)
     .join('\n\n');
 }
 
@@ -139,57 +171,40 @@ export async function POST() {
       'placeholder';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { data: profile } = await supabase
-      .from('user_profile')
-      .select('desired_perception, target_audience, tone_guardrails')
+    const { data: startupProfile } = await supabase
+      .from('startup_profiles')
+      .select(
+        'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
+      )
       .limit(1)
       .maybeSingle();
 
-    const { data: creatorPersona } = await supabase
-      .from('creator_personas')
-      .select('handle, ai_voice_profile')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: allStartupMemory } = await supabase
+      .from('startup_memory_entries')
+      .select('id, content, kind, metadata, embedding');
 
-    const { data: allIdeas } = await supabase
-      .from('raw_ideas')
-      .select('id, content, embedding, type');
+    const validEntries = ((allStartupMemory || []) as StartupMemoryRow[])
+      .map((entry) => ({ ...entry, embedding: ensureArray(entry.embedding) }))
+      .filter((entry) => entry.embedding.length > 0);
 
-    function ensureArray(val: unknown): number[] {
-      if (Array.isArray(val)) return val;
-      if (typeof val === 'string') {
-        try {
-          return JSON.parse(val);
-        } catch {
-          return val.replace('[', '').replace(']', '').split(',').map(Number);
-        }
-      }
-      return [];
-    }
-
-    const validIdeas = (allIdeas as RawIdeaRow[])
-      .map(idea => ({ ...idea, embedding: ensureArray(idea.embedding) }))
-      .filter(idea => idea.embedding.length > 0);
-
-    if (validIdeas.length === 0) {
+    if (validEntries.length === 0) {
       return NextResponse.json(
-        { error: 'Ideas exist, but none have valid embeddings yet.' },
-        { status: 500 }
+        { error: 'Save some startup memory first so the startup generator has context.' },
+        { status: 400 }
       );
     }
 
-    const seedIdea = validIdeas[Math.floor(Math.random() * validIdeas.length)];
+    const seedEntry = validEntries[Math.floor(Math.random() * validEntries.length)];
 
-    const { data: relatedIdeas, error: matchError } = await supabase.rpc('match_ideas', {
-      query_embedding: seedIdea.embedding,
+    const { data: relatedEntries, error: matchError } = await supabase.rpc('match_startup_memory', {
+      query_embedding: seedEntry.embedding,
       match_threshold: 0.1,
       match_count: 4,
     });
 
     if (matchError) {
       return NextResponse.json(
-        { error: 'Failed to find related ideas via similarity search.' },
+        { error: 'Failed to retrieve related startup memory.' },
         { status: 500 }
       );
     }
@@ -204,75 +219,64 @@ export async function POST() {
       .order('priority', { ascending: false })
       .limit(18);
 
-    const { data: obsessionRows } = await supabase
-      .from('mind_model_entries')
-      .select('statement')
-      .eq('status', 'confirmed')
-      .eq('kind', 'current_obsession')
-      .order('updated_at', { ascending: false })
-      .limit(6);
-
-    const recentThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: eventPovRows } = await supabase
-      .from('mind_model_entries')
-      .select('statement')
-      .eq('kind', 'event_pov')
-      .in('status', ['confirmed', 'suggested'])
-      .gte('updated_at', recentThreshold)
-      .order('updated_at', { ascending: false })
-      .limit(6);
+    const { data: startupReflectionRows } = await supabase
+      .from('startup_reflection_turns')
+      .select('prompt, answer')
+      .neq('answer', '')
+      .neq('answer', '[skipped]')
+      .order('created_at', { ascending: false })
+      .limit(8);
 
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
       .select('content')
-      .eq('generation_mode', 'general')
+      .eq('generation_mode', 'startup')
       .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(16);
 
-    const contextIdeas = buildContextIdeas(seedIdea.content, (relatedIdeas || []) as IdeaMatch[]);
-    const systemPrompt = buildGenerationSystemPrompt({
-      profile: (profile || null) as ProfileRow,
-      creatorPersona: (creatorPersona || null) as CreatorPersonaRow,
-      sourceType: seedIdea.type,
-      contextIdeas,
-      pastTweets:
+    const startupContext = buildStartupContext(seedEntry, (relatedEntries || []) as StartupMemoryMatch[]);
+    const systemPrompt = buildStartupGenerationSystemPrompt({
+      startupProfile: (startupProfile || null) as StartupProfile | null,
+      startupContext,
+      sharedMindModel: ((worldviewRows || []) as MindModelEntry[]) || [],
+      startupReflections: (startupReflectionRows || []).map(
+        (row) => `Prompt: ${row.prompt}\nAnswer: ${row.answer}`
+      ),
+      recentStartupTweets:
         ((recentTweets || []) as TweetContentRow[]).map((tweet) => tweet.content).join('\n') ||
         'None',
-      confirmedEntries: ((worldviewRows || []) as MindModelEntry[]) || [],
-      currentObsessions: (obsessionRows || []).map((row) => row.statement).filter(Boolean),
-      recentEventPovs: (eventPovRows || []).map((row) => row.statement).filter(Boolean),
     });
 
     const generationResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildCandidateGenerationPrompt({ seedIdea: seedIdea.content }),
+      contents: buildStartupCandidateGenerationPrompt({ seedIdea: seedEntry.content }),
       config: {
         systemInstruction: systemPrompt,
-        temperature: 0.85,
+        temperature: 0.8,
       },
     });
 
     const draftSet = normalizeDraftSet(
       parseJsonResponse<GenerationDraftSet>(
         generationResponse.text || '',
-        'Generation model returned invalid structured output'
+        'Startup generation model returned invalid structured output'
       )
     );
 
     if (draftSet.candidates.length === 0) {
       return NextResponse.json(
-        { error: 'Generation model returned no usable tweet candidates.' },
+        { error: 'Startup generation returned no usable tweet candidates.' },
         { status: 500 }
       );
     }
 
     const criticResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildAuthenticityCriticPrompt(JSON.stringify(draftSet, null, 2)),
+      contents: buildStartupCriticPrompt(JSON.stringify(draftSet, null, 2)),
       config: {
         systemInstruction:
-          'You are a strict evaluator of authenticity. Return JSON only and never add prose outside the schema.',
+          'You are a strict startup communication evaluator. Return JSON only and never add prose outside the schema.',
         temperature: 0.2,
       },
     });
@@ -280,16 +284,21 @@ export async function POST() {
     const rankedResult = normalizeRankedResult(
       parseJsonResponse<RankedGenerationResult>(
         criticResponse.text || '',
-        'Authenticity critic returned invalid structured output'
+        'Startup critic returned invalid structured output'
       )
     );
 
     const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
     const selectedCandidate =
-      draftSet.candidates[rankedResult.selected_index] || rankedCandidates[0] || draftSet.candidates[0];
+      draftSet.candidates[rankedResult.selected_index] ||
+      rankedCandidates[0] ||
+      draftSet.candidates[0];
 
     if (!selectedCandidate) {
-      return NextResponse.json({ error: 'No selected draft could be determined.' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'No startup draft could be selected.' },
+        { status: 500 }
+      );
     }
 
     const selectedRanking =
@@ -304,10 +313,9 @@ export async function POST() {
         score: candidate.score,
       }));
 
-    const rationaleParts = [
-      selectedCandidate.why_it_fits,
-      selectedRanking?.critiqueReason || '',
-    ].filter(Boolean);
+    const rationaleParts = [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || ''].filter(
+      Boolean
+    );
 
     const { data: insertedTweet, error: insertError } = await supabase
       .from('generated_tweets')
@@ -315,7 +323,7 @@ export async function POST() {
         {
           content: selectedCandidate.draft,
           status: 'PENDING',
-          generation_mode: 'general',
+          generation_mode: 'startup',
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
@@ -325,7 +333,10 @@ export async function POST() {
       .single();
 
     if (insertError || !insertedTweet) {
-      return NextResponse.json({ error: 'Failed to save the generated tweet.' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to save the startup draft.' },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
@@ -334,7 +345,7 @@ export async function POST() {
     });
   } catch (err: unknown) {
     return NextResponse.json(
-      { error: getErrorMessage(err, 'An unexpected generation error occurred.') },
+      { error: getErrorMessage(err, 'An unexpected startup generation error occurred.') },
       { status: 500 }
     );
   }

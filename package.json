@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.45.0",

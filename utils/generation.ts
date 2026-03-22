@@ -1,4 +1,5 @@
 import type { MindModelEntry } from "./self-model";
+import type { StartupProfile } from "./startup";
 
 export type CreatorPersonaRecord = {
   handle: string;
@@ -174,6 +175,151 @@ Evaluate each candidate on:
 - non-generic phrasing
 - non-performative tone
 - distance from direct source-note copying
+
+Return JSON only:
+{
+  "selected_index": 0,
+  "ranked": [
+    {
+      "draft_index": 0,
+      "score": 91,
+      "reason": "..."
+    }
+  ]
+}
+
+Candidates:
+${candidatesJson}`;
+}
+
+type BuildStartupGenerationSystemPromptParams = {
+  startupProfile: StartupProfile | null;
+  startupContext: string;
+  sharedMindModel?: MindModelEntry[];
+  startupReflections?: string[];
+  recentStartupTweets?: string;
+};
+
+export function buildStartupGenerationSystemPrompt({
+  startupProfile,
+  startupContext,
+  sharedMindModel,
+  startupReflections,
+  recentStartupTweets,
+}: BuildStartupGenerationSystemPromptParams) {
+  const startupName = getProfileLine(startupProfile?.startup_name, "the user's startup");
+  const oneLiner = getProfileLine(
+    startupProfile?.one_liner,
+    "A startup the user is still sharpening for clearer public communication."
+  );
+  const targetCustomer = getProfileLine(
+    startupProfile?.target_customer,
+    "Customers or broader people who need the product explained clearly."
+  );
+  const painfulProblem = getProfileLine(
+    startupProfile?.painful_problem,
+    "The product solves a painful but still under-explained problem."
+  );
+  const transformation = getProfileLine(
+    startupProfile?.transformation,
+    "Explain what changes for the user after adopting the product."
+  );
+  const positioning = getProfileLine(
+    startupProfile?.positioning,
+    "Position the startup in plain language before using insider jargon."
+  );
+  const proofPoints = getProfileLine(
+    startupProfile?.proof_points,
+    "Use proof sparingly but concretely when it exists."
+  );
+  const objections = getProfileLine(
+    startupProfile?.objections,
+    "Surface the skeptical question an outsider would naturally ask."
+  );
+  const languageGuardrails = getProfileLine(
+    startupProfile?.language_guardrails,
+    "Prefer customer language, plain talk, and explainability over founder jargon."
+  );
+
+  return `You are a world-class startup communicator and thought partner.
+Your mission is to generate tweets about ${startupName} that make the startup legible, compelling, and human to broader people.
+
+<startup_profile>
+- STARTUP: ${startupName}
+- ONE LINER: ${oneLiner}
+- TARGET CUSTOMER: ${targetCustomer}
+- PAINFUL PROBLEM: ${painfulProblem}
+- TRANSFORMATION: ${transformation}
+- POSITIONING: ${positioning}
+- PROOF: ${proofPoints}
+- OBJECTIONS: ${objections}
+- LANGUAGE GUARDRAILS: ${languageGuardrails}
+</startup_profile>
+
+<shared_worldview>
+${formatMindModelEntries(sharedMindModel)}
+</shared_worldview>
+
+<startup_reflections>
+${formatStringList(startupReflections)}
+</startup_reflections>
+
+<recent_startup_tweets_do_not_repeat>
+${recentStartupTweets || "None"}
+</recent_startup_tweets_do_not_repeat>
+
+<startup_memory>
+${startupContext}
+</startup_memory>
+
+CRITICAL INSTRUCTIONS:
+1. This is not the general thought generator. Write specifically about the startup.
+2. Optimize for customers/public first. Explain clearly before sounding clever.
+3. Prefer problem-solution, stakes, misunderstanding, proof, objection-handling, and concrete transformation.
+4. Use the shared worldview only as a taste and reasoning filter. Do not pull in unrelated general-vault ideas.
+5. Avoid builder jargon unless it is necessary and then explain it.
+6. Every draft must fit under 280 characters.
+7. Better to make the startup understandable than to make the tweet ornamental.`;
+}
+
+export function buildStartupCandidateGenerationPrompt({
+  seedIdea,
+  thesisCount = 4,
+  draftCount = 3,
+}: BuildCandidatePromptParams) {
+  return `Startup memory seed:
+${seedIdea}
+
+Return JSON only with this shape:
+{
+  "theses": ["...", "..."],
+  "candidates": [
+    {
+      "thesis": "...",
+      "draft": "...",
+      "why_it_fits": "..."
+    }
+  ]
+}
+
+Rules:
+- Generate ${thesisCount} theses and ${draftCount} tweet candidates.
+- Favor distinct startup communication angles such as problem clarity, customer transformation, objection handling, proof, and positioning.
+- Every draft must be under 280 characters.
+- "why_it_fits" must explain why the draft helps broader people understand the startup while still fitting the user's worldview.`;
+}
+
+export function buildStartupCriticPrompt(candidatesJson: string) {
+  return `You are a strict startup communication critic.
+Rank the tweet candidates by how likely they are to make the startup clearer, more compelling, and more authentic to the user.
+
+Evaluate each candidate on:
+- customer/public clarity
+- problem-solution coherence
+- audience fit
+- authenticity to the user's worldview
+- avoidance of unnecessary builder jargon
+- usefulness for distribution
 
 Return JSON only:
 {

@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeLiveTopics, parseGoogleNewsFeed, parseXTrendPayload } from '../utils/discovery.ts';
+import {
+  buildNewsFeedUrl,
+  dedupeLiveTopics,
+  parseGoogleNewsFeed,
+  parseXTrendPayload,
+} from '../utils/discovery.ts';
+
+test('buildNewsFeedUrl respects country and topic locale config', () => {
+  const url = buildNewsFeedUrl('in', 'technology');
+
+  assert.match(url, /TECHNOLOGY/);
+  assert.match(url, /gl=IN/);
+  assert.match(url, /ceid=IN%3Aen/);
+});
 
 test('parseGoogleNewsFeed extracts readable topic cards from RSS', () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -16,28 +29,39 @@ test('parseGoogleNewsFeed extracts readable topic cards from RSS', () => {
     </channel>
   </rss>`;
 
-  const topics = parseGoogleNewsFeed(xml, 'Fallback Feed');
+  const topics = parseGoogleNewsFeed(xml, {
+    country: 'worldwide',
+    topic: 'policy',
+    fallbackSourceLabel: 'Fallback Feed',
+  });
 
   assert.equal(topics.length, 1);
   assert.equal(topics[0]?.title, 'Chip export rules tighten again');
   assert.match(topics[0]?.summary || '', /policy story about semiconductors/i);
+  assert.equal(topics[0]?.country, 'worldwide');
+  assert.equal(topics[0]?.topic, 'policy');
 });
 
 test('parseXTrendPayload converts trend API payload into usable live topics', () => {
-  const topics = parseXTrendPayload([
-    {
-      locations: [{ name: 'Worldwide' }],
-      trends: [{ name: 'OpenAI', url: 'https://x.com/search?q=OpenAI', tweet_volume: 120000 }],
-    },
-  ]);
+  const topics = parseXTrendPayload(
+    [
+      {
+        locations: [{ name: 'Worldwide' }],
+        trends: [{ name: 'OpenAI', url: 'https://x.com/search?q=OpenAI', tweet_volume: 120000 }],
+      },
+    ],
+    { country: 'worldwide', topic: 'ai' }
+  );
 
   assert.equal(topics.length, 1);
   assert.equal(topics[0]?.kind, 'x_trend');
   assert.equal(topics[0]?.sourceLabel, 'Worldwide');
+  assert.equal(topics[0]?.country, 'worldwide');
+  assert.equal(topics[0]?.topic, 'ai');
   assert.match(topics[0]?.summary || '', /posts in the last 24h/i);
 });
 
-test('dedupeLiveTopics removes duplicate titles within the same source kind', () => {
+test('dedupeLiveTopics removes duplicate titles within the same source kind, country, and topic', () => {
   const deduped = dedupeLiveTopics([
     {
       id: 'one',
@@ -49,6 +73,9 @@ test('dedupeLiveTopics removes duplicate titles within the same source kind', ()
       freshnessLabel: null,
       promptHint: 'Prompt',
       topicUrl: null,
+      country: 'worldwide',
+      topic: 'general',
+      sourceType: 'news',
     },
     {
       id: 'two',
@@ -60,6 +87,9 @@ test('dedupeLiveTopics removes duplicate titles within the same source kind', ()
       freshnessLabel: null,
       promptHint: 'Prompt',
       topicUrl: null,
+      country: 'worldwide',
+      topic: 'general',
+      sourceType: 'news',
     },
   ]);
 

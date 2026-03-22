@@ -1,4 +1,86 @@
 import * as cheerio from 'cheerio';
+import type { DiscoveryCountryId, DiscoveryTopicId } from './discovery-config';
+
+const DISCOVERY_COUNTRY_RUNTIME = {
+  worldwide: {
+    id: 'worldwide',
+    label: 'Worldwide',
+    news: { hl: 'en-US', gl: 'US', ceid: 'US:en' },
+  },
+  us: {
+    id: 'us',
+    label: 'United States',
+    news: { hl: 'en-US', gl: 'US', ceid: 'US:en' },
+  },
+  in: {
+    id: 'in',
+    label: 'India',
+    news: { hl: 'en-IN', gl: 'IN', ceid: 'IN:en' },
+  },
+  gb: {
+    id: 'gb',
+    label: 'United Kingdom',
+    news: { hl: 'en-GB', gl: 'GB', ceid: 'GB:en' },
+  },
+  jp: {
+    id: 'jp',
+    label: 'Japan',
+    news: { hl: 'en', gl: 'JP', ceid: 'JP:en' },
+  },
+} as const satisfies Record<
+  DiscoveryCountryId,
+  {
+    id: DiscoveryCountryId;
+    label: string;
+    news: { hl: string; gl: string; ceid: string };
+  }
+>;
+
+const DISCOVERY_TOPIC_RUNTIME = {
+  general: { id: 'general', label: 'General', mode: 'top', query: '' },
+  technology: { id: 'technology', label: 'Technology', mode: 'section', query: 'TECHNOLOGY' },
+  business: { id: 'business', label: 'Business', mode: 'section', query: 'BUSINESS' },
+  ai: {
+    id: 'ai',
+    label: 'AI',
+    mode: 'search',
+    query: 'artificial intelligence OR generative AI OR OpenAI OR Gemini',
+  },
+  startups: {
+    id: 'startups',
+    label: 'Startups',
+    mode: 'search',
+    query: 'startup OR startups OR founders OR venture capital',
+  },
+  finance: {
+    id: 'finance',
+    label: 'Finance',
+    mode: 'search',
+    query: 'finance OR markets OR economy OR investing',
+  },
+  policy: {
+    id: 'policy',
+    label: 'Policy',
+    mode: 'search',
+    query: 'policy OR regulation OR law OR government',
+  },
+} as const satisfies Record<
+  DiscoveryTopicId,
+  {
+    id: DiscoveryTopicId;
+    label: string;
+    mode: 'top' | 'section' | 'search';
+    query: string;
+  }
+>;
+
+function getRuntimeCountry(countryId: DiscoveryCountryId) {
+  return DISCOVERY_COUNTRY_RUNTIME[countryId] || DISCOVERY_COUNTRY_RUNTIME.worldwide;
+}
+
+function getRuntimeTopic(topicId: DiscoveryTopicId) {
+  return DISCOVERY_TOPIC_RUNTIME[topicId] || DISCOVERY_TOPIC_RUNTIME.general;
+}
 
 export type LiveTopic = {
   id: string;
@@ -10,6 +92,9 @@ export type LiveTopic = {
   freshnessLabel: string | null;
   promptHint: string;
   topicUrl: string | null;
+  country: DiscoveryCountryId;
+  topic: DiscoveryTopicId;
+  sourceType: 'news' | 'x';
 };
 
 function sanitizeText(value: string) {
@@ -31,7 +116,26 @@ function createTopicId(prefix: string, title: string) {
   return `${prefix}-${normalized || 'topic'}`;
 }
 
-export function parseGoogleNewsFeed(xml: string, fallbackSourceLabel: string): LiveTopic[] {
+export function buildNewsFeedUrl(countryId: DiscoveryCountryId, topicId: DiscoveryTopicId) {
+  const country = getRuntimeCountry(countryId);
+  const topic = getRuntimeTopic(topicId);
+  const { hl, gl, ceid } = country.news;
+
+  if (topic.mode === 'top') {
+    return `https://news.google.com/rss?hl=${encodeURIComponent(hl)}&gl=${encodeURIComponent(gl)}&ceid=${encodeURIComponent(ceid)}`;
+  }
+
+  if (topic.mode === 'section') {
+    return `https://news.google.com/rss/headlines/section/topic/${encodeURIComponent(topic.query)}?hl=${encodeURIComponent(hl)}&gl=${encodeURIComponent(gl)}&ceid=${encodeURIComponent(ceid)}`;
+  }
+
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(topic.query)}&hl=${encodeURIComponent(hl)}&gl=${encodeURIComponent(gl)}&ceid=${encodeURIComponent(ceid)}`;
+}
+
+export function parseGoogleNewsFeed(
+  xml: string,
+  params: { country: DiscoveryCountryId; topic: DiscoveryTopicId; fallbackSourceLabel: string }
+): LiveTopic[] {
   const $ = cheerio.load(xml, { xmlMode: true });
   const topics: LiveTopic[] = [];
 
@@ -40,7 +144,7 @@ export function parseGoogleNewsFeed(xml: string, fallbackSourceLabel: string): L
     const title = rawTitle.replace(/\s+-\s+[^-]+$/, '').trim() || rawTitle;
     const link = sanitizeText($(element).find('link').first().text()) || null;
     const sourceLabel =
-      sanitizeText($(element).find('source').first().text()) || fallbackSourceLabel;
+      sanitizeText($(element).find('source').first().text()) || params.fallbackSourceLabel;
     const descriptionHtml = $(element).find('description').first().text();
     const description = stripHtml(descriptionHtml);
     const pubDate = sanitizeText($(element).find('pubDate').first().text()) || null;
@@ -50,7 +154,7 @@ export function parseGoogleNewsFeed(xml: string, fallbackSourceLabel: string): L
     }
 
     topics.push({
-      id: createTopicId(`news-${index}`, title),
+      id: createTopicId(`news-${params.country}-${params.topic}-${index}`, title),
       kind: 'news',
       title,
       summary:
@@ -62,6 +166,9 @@ export function parseGoogleNewsFeed(xml: string, fallbackSourceLabel: string): L
       promptHint:
         'What is your actual take here? Is the deeper story about incentives, power, timing, systems, or culture?',
       topicUrl: link,
+      country: params.country,
+      topic: params.topic,
+      sourceType: 'news',
     });
   });
 
@@ -79,7 +186,10 @@ type XTrendApiPayload = Array<{
   locations?: Array<{ name?: string }>;
 }>;
 
-export function parseXTrendPayload(payload: unknown): LiveTopic[] {
+export function parseXTrendPayload(
+  payload: unknown,
+  params: { country: DiscoveryCountryId; topic: DiscoveryTopicId }
+): LiveTopic[] {
   const response = Array.isArray(payload) ? (payload as XTrendApiPayload) : [];
   const trendBlock = response[0];
   const locationName = trendBlock?.locations?.[0]?.name || 'X';
@@ -96,7 +206,7 @@ export function parseXTrendPayload(payload: unknown): LiveTopic[] {
           : 'Trending now on X';
 
       return {
-        id: createTopicId(`x-${index}`, title),
+        id: createTopicId(`x-${params.country}-${params.topic}-${index}`, title),
         kind: 'x_trend',
         title,
         summary: `${tweetVolume}. Use the trend as a live signal, then articulate what you believe it reveals.`,
@@ -108,6 +218,9 @@ export function parseXTrendPayload(payload: unknown): LiveTopic[] {
         topicUrl:
           trend.url ||
           `https://x.com/search?q=${encodeURIComponent(title)}&src=trend_click&f=live`,
+        country: params.country,
+        topic: params.topic,
+        sourceType: 'x',
       };
     });
 }
@@ -115,7 +228,7 @@ export function parseXTrendPayload(payload: unknown): LiveTopic[] {
 export function dedupeLiveTopics(topics: LiveTopic[]) {
   const seen = new Set<string>();
   return topics.filter((topic) => {
-    const key = `${topic.kind}:${topic.title.toLowerCase()}`;
+    const key = `${topic.kind}:${topic.country}:${topic.topic}:${topic.title.toLowerCase()}`;
     if (seen.has(key)) {
       return false;
     }

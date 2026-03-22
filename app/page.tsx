@@ -15,6 +15,14 @@ import PersonaVault from './PersonaVault';
 import ReflectionPromptCard from './ReflectionPromptCard';
 import { getErrorMessage } from '@/utils/errors';
 import type { LiveTopic } from '@/utils/discovery';
+import {
+  DISCOVERY_COUNTRIES,
+  DISCOVERY_SOURCES,
+  DISCOVERY_TOPICS,
+  type DiscoveryCountryId,
+  type DiscoverySourceId,
+  type DiscoveryTopicId,
+} from '@/utils/discovery-config';
 import type { EventReflection, MindModelEntry, ReflectionTurn } from '@/utils/self-model';
 
 function getActionError(result: unknown, fallback: string) {
@@ -31,8 +39,18 @@ function getActionError(result: unknown, fallback: string) {
   return fallback;
 }
 
-async function fetchLiveTopicsFromApi() {
-  const response = await fetch('/api/discover', {
+async function fetchLiveTopicsFromApi(params: {
+  country: DiscoveryCountryId;
+  topic: DiscoveryTopicId;
+  source: DiscoverySourceId;
+}) {
+  const searchParams = new URLSearchParams({
+    country: params.country,
+    topic: params.topic,
+    source: params.source,
+  });
+
+  const response = await fetch(`/api/discover?${searchParams.toString()}`, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -46,6 +64,9 @@ async function fetchLiveTopicsFromApi() {
     success: true;
     topics: LiveTopic[];
     meta: {
+      selectedCountry: DiscoveryCountryId;
+      selectedTopic: DiscoveryTopicId;
+      selectedSource: DiscoverySourceId;
       xTrendsEnabled: boolean;
       xTrendsMessage: string | null;
       newsCount: number;
@@ -78,7 +99,13 @@ export default function Home() {
   const [liveTopics, setLiveTopics] = useState<LiveTopic[]>([]);
   const [liveTopicsLoading, setLiveTopicsLoading] = useState(false);
   const [liveTopicsError, setLiveTopicsError] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<DiscoveryCountryId>('worldwide');
+  const [selectedTopic, setSelectedTopic] = useState<DiscoveryTopicId>('general');
+  const [selectedSource, setSelectedSource] = useState<DiscoverySourceId>('all');
   const [liveTopicsMeta, setLiveTopicsMeta] = useState<{
+    selectedCountry: DiscoveryCountryId;
+    selectedTopic: DiscoveryTopicId;
+    selectedSource: DiscoverySourceId;
     xTrendsEnabled: boolean;
     xTrendsMessage: string | null;
     newsCount: number;
@@ -111,7 +138,11 @@ export default function Home() {
     async function loadLiveTopics() {
       try {
         setLiveTopicsLoading(true);
-        const data = await fetchLiveTopicsFromApi();
+        const data = await fetchLiveTopicsFromApi({
+          country: selectedCountry,
+          topic: selectedTopic,
+          source: selectedSource,
+        });
         setLiveTopics(data.topics);
         setLiveTopicsMeta(data.meta);
         setLiveTopicsError(null);
@@ -123,7 +154,7 @@ export default function Home() {
     }
 
     void loadLiveTopics();
-  }, []);
+  }, [selectedCountry, selectedSource, selectedTopic]);
 
   function pushLearnedEntries(entries: MindModelEntry[] | undefined) {
     if (!entries || entries.length === 0) {
@@ -289,7 +320,11 @@ export default function Home() {
   async function handleRefreshLiveTopics() {
     try {
       setLiveTopicsLoading(true);
-      const data = await fetchLiveTopicsFromApi();
+      const data = await fetchLiveTopicsFromApi({
+        country: selectedCountry,
+        topic: selectedTopic,
+        source: selectedSource,
+      });
       setLiveTopics(data.topics);
       setLiveTopicsMeta(data.meta);
       setLiveTopicsError(null);
@@ -349,6 +384,9 @@ export default function Home() {
               </Link>
               <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 Mind Model
+              </Link>
+              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                Startup Workspace
               </Link>
               <Link href="/review" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 Review Drafts
@@ -531,19 +569,85 @@ export default function Home() {
                   the app can learn your take and use it in future tweets.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleRefreshLiveTopics()}
-                disabled={liveTopicsLoading}
-                className="rounded-full border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {liveTopicsLoading ? 'Refreshing...' : 'Refresh Topics'}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshLiveTopics()}
+                  disabled={liveTopicsLoading}
+                  className="rounded-full border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {liveTopicsLoading ? 'Refreshing...' : 'Refresh Topics'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Country
+                <select
+                  value={selectedCountry}
+                  onChange={(event) => setSelectedCountry(event.target.value as DiscoveryCountryId)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm font-medium normal-case tracking-normal text-zinc-200 outline-none transition-colors focus:border-zinc-600"
+                >
+                  {DISCOVERY_COUNTRIES.map((country) => (
+                    <option key={country.id} value={country.id}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Topic
+                <select
+                  value={selectedTopic}
+                  onChange={(event) => setSelectedTopic(event.target.value as DiscoveryTopicId)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm font-medium normal-case tracking-normal text-zinc-200 outline-none transition-colors focus:border-zinc-600"
+                >
+                  {DISCOVERY_TOPICS.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Source
+                <select
+                  value={selectedSource}
+                  onChange={(event) => setSelectedSource(event.target.value as DiscoverySourceId)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm font-medium normal-case tracking-normal text-zinc-200 outline-none transition-colors focus:border-zinc-600"
+                >
+                  {DISCOVERY_SOURCES.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {liveTopicsMeta?.xTrendsMessage ? (
               <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-400">
                 {liveTopicsMeta.xTrendsMessage}
+              </div>
+            ) : null}
+
+            {liveTopicsMeta ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <span className="rounded-full border border-zinc-800 px-3 py-1">
+                  {DISCOVERY_COUNTRIES.find((item) => item.id === liveTopicsMeta.selectedCountry)?.label}
+                </span>
+                <span className="rounded-full border border-zinc-800 px-3 py-1">
+                  {DISCOVERY_TOPICS.find((item) => item.id === liveTopicsMeta.selectedTopic)?.label}
+                </span>
+                <span className="rounded-full border border-zinc-800 px-3 py-1">
+                  {DISCOVERY_SOURCES.find((item) => item.id === liveTopicsMeta.selectedSource)?.label}
+                </span>
+                <span>
+                  {liveTopicsMeta.newsCount} news · {liveTopicsMeta.xTrendCount} X trends
+                </span>
               </div>
             ) : null}
 
@@ -563,6 +667,12 @@ export default function Home() {
                     <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500">
                       <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                         {topic.kind === 'x_trend' ? 'X trend' : 'News'}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                        {DISCOVERY_COUNTRIES.find((item) => item.id === topic.country)?.label || topic.country}
+                      </span>
+                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                        {DISCOVERY_TOPICS.find((item) => item.id === topic.topic)?.label || topic.topic}
                       </span>
                       <span>{topic.sourceLabel}</span>
                       {topic.freshnessLabel ? <span>{topic.freshnessLabel}</span> : null}

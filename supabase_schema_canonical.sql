@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   content text NOT NULL,
   status text NOT NULL DEFAULT 'PENDING',
+  generation_mode text NOT NULL DEFAULT 'general',
   theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   rationale text NOT NULL DEFAULT '',
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
 );
 
 ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'PENDING';
+ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general';
 ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '';
@@ -43,6 +45,19 @@ BEGIN
     ALTER TABLE generated_tweets
       ADD CONSTRAINT generated_tweets_status_check
       CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'OPENED_IN_X', 'PUBLISHED'));
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'generated_tweets_generation_mode_check'
+  ) THEN
+    ALTER TABLE generated_tweets
+      ADD CONSTRAINT generated_tweets_generation_mode_check
+      CHECK (generation_mode IN ('general', 'startup'));
   END IF;
 END $$;
 
@@ -61,6 +76,75 @@ CREATE TABLE IF NOT EXISTS creator_personas (
   ai_voice_profile text NOT NULL,
   created_at timestamp with time zone DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS startup_profiles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  startup_name text NOT NULL DEFAULT '',
+  one_liner text NOT NULL DEFAULT '',
+  target_customer text NOT NULL DEFAULT '',
+  painful_problem text NOT NULL DEFAULT '',
+  transformation text NOT NULL DEFAULT '',
+  positioning text NOT NULL DEFAULT '',
+  proof_points text NOT NULL DEFAULT '',
+  objections text NOT NULL DEFAULT '',
+  language_guardrails text NOT NULL DEFAULT '',
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS startup_memory_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  content text NOT NULL,
+  kind text NOT NULL DEFAULT 'product_insight',
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  embedding vector(3072),
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'startup_memory_entries_kind_check'
+  ) THEN
+    ALTER TABLE startup_memory_entries
+      ADD CONSTRAINT startup_memory_entries_kind_check
+      CHECK (kind IN (
+        'product_insight',
+        'customer_pain',
+        'positioning',
+        'objection',
+        'proof',
+        'feature_update',
+        'distribution_gtm',
+        'founder_belief',
+        'user_language'
+      ));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS startup_reflection_turns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mode text NOT NULL DEFAULT 'capture_followup',
+  prompt text NOT NULL,
+  answer text NOT NULL DEFAULT '',
+  startup_memory_entry_id uuid REFERENCES startup_memory_entries(id) ON DELETE CASCADE,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'startup_reflection_turns_mode_check'
+  ) THEN
+    ALTER TABLE startup_reflection_turns
+      ADD CONSTRAINT startup_reflection_turns_mode_check
+      CHECK (mode IN ('capture_followup'));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS mind_model_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -173,6 +257,9 @@ ALTER TABLE raw_ideas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE generated_tweets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE creator_personas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE startup_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE startup_memory_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE startup_reflection_turns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mind_model_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reflection_turns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE draft_feedback ENABLE ROW LEVEL SECURITY;
@@ -197,6 +284,15 @@ CREATE POLICY "Allow anonymous full access to user_profile" ON user_profile FOR 
 
 DROP POLICY IF EXISTS "Allow all access to creator_personas" ON creator_personas;
 CREATE POLICY "Allow all access to creator_personas" ON creator_personas FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to startup_profiles" ON startup_profiles;
+CREATE POLICY "Allow all access to startup_profiles" ON startup_profiles FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to startup_memory_entries" ON startup_memory_entries;
+CREATE POLICY "Allow all access to startup_memory_entries" ON startup_memory_entries FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to startup_reflection_turns" ON startup_reflection_turns;
+CREATE POLICY "Allow all access to startup_reflection_turns" ON startup_reflection_turns FOR ALL TO public USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow all access to mind_model_entries" ON mind_model_entries;
 CREATE POLICY "Allow all access to mind_model_entries" ON mind_model_entries FOR ALL TO public USING (true) WITH CHECK (true);
@@ -240,6 +336,50 @@ GRANT EXECUTE ON FUNCTION match_ideas TO anon;
 GRANT EXECUTE ON FUNCTION match_ideas TO authenticated;
 GRANT EXECUTE ON FUNCTION match_ideas TO service_role;
 
+CREATE OR REPLACE FUNCTION match_startup_memory(
+  query_embedding vector(3072),
+  match_threshold float,
+  match_count int
+)
+RETURNS TABLE (
+  id uuid,
+  content text,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    startup_memory_entries.id,
+    startup_memory_entries.content,
+    1 - (startup_memory_entries.embedding <=> query_embedding) AS similarity
+  FROM startup_memory_entries
+  WHERE startup_memory_entries.embedding IS NOT NULL
+    AND 1 - (startup_memory_entries.embedding <=> query_embedding) > match_threshold
+  ORDER BY 1 - (startup_memory_entries.embedding <=> query_embedding) DESC
+  LIMIT match_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION match_startup_memory TO anon;
+GRANT EXECUTE ON FUNCTION match_startup_memory TO authenticated;
+GRANT EXECUTE ON FUNCTION match_startup_memory TO service_role;
+
 INSERT INTO user_profile (desired_perception, target_audience, tone_guardrails)
 SELECT '', '', ''
 WHERE NOT EXISTS (SELECT 1 FROM user_profile);
+
+INSERT INTO startup_profiles (
+  startup_name,
+  one_liner,
+  target_customer,
+  painful_problem,
+  transformation,
+  positioning,
+  proof_points,
+  objections,
+  language_guardrails
+)
+SELECT '', '', '', '', '', '', '', '', ''
+WHERE NOT EXISTS (SELECT 1 FROM startup_profiles);

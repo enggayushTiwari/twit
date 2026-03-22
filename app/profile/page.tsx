@@ -343,6 +343,9 @@ export default function ProfilePage() {
               <Link href="/review" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 Review Drafts
               </Link>
+              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                Startup Workspace
+              </Link>
               <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 &larr; Capture
               </Link>

@@ -115,6 +115,7 @@ export type GeneratedTweetRecord = {
   content: string;
   status: string;
   created_at: string;
+  generation_mode?: "general" | "startup";
   theses?: string[] | null;
   alternates?: TweetAlternate[] | null;
   rationale?: string | null;

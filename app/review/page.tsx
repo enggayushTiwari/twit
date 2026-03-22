@@ -24,6 +24,7 @@ import {
 import { getFeedbackTagLabel, FEEDBACK_TAG_OPTIONS, type FeedbackTag, type ReflectionTurn } from '@/utils/self-model';
 import type { GeneratedTweetRecord } from '@/utils/self-model';
 import { getReviewStatusLabel, isReadyToPost } from '@/utils/review-status';
+import type { GeneratedTweetMode } from '@/utils/startup';
 
 type Tab = 'pending' | 'history';
 
@@ -43,6 +44,8 @@ function getActionError(result: unknown, fallback: string) {
 
 export default function ReviewDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('pending');
+  const [pendingMode, setPendingMode] = useState<GeneratedTweetMode>('general');
+  const [historyMode, setHistoryMode] = useState<GeneratedTweetMode | 'all'>('all');
   const [tweets, setTweets] = useState<GeneratedTweetRecord[]>([]);
   const [historyTweets, setHistoryTweets] = useState<GeneratedTweetRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,8 +58,8 @@ export default function ReviewDashboard() {
   const [feedbackNotesById, setFeedbackNotesById] = useState<Record<string, string>>({});
   const [draftFeedbackReflection, setDraftFeedbackReflection] = useState<ReflectionTurn | null>(null);
 
-  async function refreshPendingTweets() {
-    const result = await getPendingTweets();
+  async function refreshPendingTweets(mode: GeneratedTweetMode = pendingMode) {
+    const result = await getPendingTweets(mode);
     if (result.success && result.data) {
       setTweets(result.data);
       setError(null);
@@ -65,9 +68,9 @@ export default function ReviewDashboard() {
     }
   }
 
-  async function refreshHistoryTweets() {
+  async function refreshHistoryTweets(mode: GeneratedTweetMode | 'all' = historyMode) {
     setHistoryLoading(true);
-    const result = await getTweetHistory();
+    const result = await getTweetHistory(mode);
     if (result.success && result.data) {
       setHistoryTweets(result.data);
       setError(null);
@@ -80,7 +83,7 @@ export default function ReviewDashboard() {
   useEffect(() => {
     async function loadInitialTweets() {
       const [pendingResult, reviewLearningResult] = await Promise.all([
-        getPendingTweets(),
+        getPendingTweets(pendingMode),
         getReviewLearningState(),
       ]);
 
@@ -98,16 +101,16 @@ export default function ReviewDashboard() {
     }
 
     void loadInitialTweets();
-  }, []);
+  }, [pendingMode]);
 
   useEffect(() => {
-    if (activeTab !== 'history' || historyTweets.length > 0) {
+    if (activeTab !== 'history') {
       return;
     }
 
     async function loadHistoryTweets() {
       setHistoryLoading(true);
-      const result = await getTweetHistory();
+      const result = await getTweetHistory(historyMode);
       if (result.success && result.data) {
         setHistoryTweets(result.data);
         setError(null);
@@ -118,14 +121,15 @@ export default function ReviewDashboard() {
     }
 
     void loadHistoryTweets();
-  }, [activeTab, historyTweets.length]);
+  }, [activeTab, historyMode]);
 
   async function handleGenerate() {
     setIsGenerating(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/generate', {
+      const endpoint = pendingMode === 'startup' ? '/api/startup/generate' : '/api/generate';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -136,8 +140,12 @@ export default function ReviewDashboard() {
         throw new Error(data.error || 'Generation failed.');
       }
 
-      await refreshPendingTweets();
-      setToast('Generated a thesis-ranked draft set.');
+      await refreshPendingTweets(pendingMode);
+      setToast(
+        pendingMode === 'startup'
+          ? 'Generated a startup-specific draft set.'
+          : 'Generated a thesis-ranked draft set.'
+      );
       window.setTimeout(() => setToast(null), 2800);
     } catch (generationError) {
       const message =
@@ -202,7 +210,7 @@ export default function ReviewDashboard() {
       setDraftFeedbackReflection(result.reflection);
     }
 
-    await refreshHistoryTweets();
+    await refreshHistoryTweets(historyMode);
     setToast(
       newStatus === 'OPENED_IN_X'
         ? 'Opened in X and logged your feedback.'
@@ -266,6 +274,9 @@ export default function ReviewDashboard() {
               <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 Mind Model
               </Link>
+              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
+                Startup Workspace
+              </Link>
               <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
                 &larr; Back to Capture
               </Link>
@@ -298,19 +309,42 @@ export default function ReviewDashboard() {
           </div>
 
           {activeTab === 'pending' ? (
-            <button
-              type="button"
-              onClick={() => void handleGenerate()}
-              disabled={isGenerating}
-              className={`mt-5 inline-flex items-center gap-2.5 rounded-xl border px-6 py-3 text-sm font-semibold transition-all ${
-                isGenerating
-                  ? 'cursor-not-allowed border-violet-500/15 bg-violet-500/[0.08] text-zinc-400'
-                  : 'border-violet-500/30 bg-gradient-to-br from-violet-500/15 to-blue-500/15 text-violet-300 hover:from-violet-500/25 hover:to-blue-500/25'
-              }`}
-            >
-              {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {isGenerating ? 'Generating...' : 'Generate Thesis-Led Draft'}
-            </button>
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
+                {(['general', 'startup'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPendingMode(mode)}
+                    className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+                      pendingMode === mode
+                        ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {mode === 'general' ? 'General' : 'Startup'}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={isGenerating}
+                className={`inline-flex items-center gap-2.5 rounded-xl border px-6 py-3 text-sm font-semibold transition-all ${
+                  isGenerating
+                    ? 'cursor-not-allowed border-violet-500/15 bg-violet-500/[0.08] text-zinc-400'
+                    : 'border-violet-500/30 bg-gradient-to-br from-violet-500/15 to-blue-500/15 text-violet-300 hover:from-violet-500/25 hover:to-blue-500/25'
+                }`}
+              >
+                {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {isGenerating
+                  ? 'Generating...'
+                  : pendingMode === 'startup'
+                  ? 'Generate Startup Draft'
+                  : 'Generate General Draft'}
+              </button>
+            </div>
           ) : null}
         </header>
 
@@ -343,7 +377,9 @@ export default function ReviewDashboard() {
           <div className="mt-8 space-y-6">
             {tweets.length === 0 && !error ? (
               <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
-                No pending tweets right now. Generate a new thesis-led draft to start the loop.
+                {pendingMode === 'startup'
+                  ? 'No pending startup drafts right now. Generate one from the startup workspace or here.'
+                  : 'No pending general drafts right now. Generate a new thesis-led draft to start the loop.'}
               </div>
             ) : null}
 
@@ -357,6 +393,11 @@ export default function ReviewDashboard() {
                   key={tweet.id}
                   className="rounded-2xl border border-zinc-900 bg-zinc-950 p-6 transition-all hover:border-zinc-800"
                 >
+                  <div className="mb-3 flex items-center gap-2 text-xs font-medium text-zinc-500">
+                    <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                      {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
+                    </span>
+                  </div>
                   <textarea
                     className="mb-4 min-h-[110px] w-full resize-none bg-transparent text-lg leading-relaxed text-zinc-200 outline-none"
                     value={tweet.content}
@@ -492,6 +533,23 @@ export default function ReviewDashboard() {
           </div>
         ) : (
           <div className="mt-8 space-y-4">
+            <div className="flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
+              {(['all', 'general', 'startup'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setHistoryMode(mode)}
+                  className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+                    historyMode === mode
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {mode === 'all' ? 'All' : mode === 'general' ? 'General' : 'Startup'}
+                </button>
+              ))}
+            </div>
+
             {historyLoading ? (
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
@@ -513,6 +571,11 @@ export default function ReviewDashboard() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
+                      <div className="mb-3 flex items-center gap-2 text-xs font-medium text-zinc-500">
+                        <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                          {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
+                        </span>
+                      </div>
                       <p className="text-[15px] leading-relaxed text-zinc-300">{tweet.content}</p>
                       {tweet.rationale ? (
                         <p className="mt-3 text-sm leading-relaxed text-zinc-500">{tweet.rationale}</p>

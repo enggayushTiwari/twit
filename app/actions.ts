@@ -7,6 +7,7 @@ import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, GENERATION_MODEL } from '../util
 import { parseJsonResponse } from '../utils/ai-json';
 import { getErrorMessage } from '../utils/errors';
 import { scrapeUrl } from '../utils/scraper';
+import type { GeneratedTweetMode } from '../utils/startup';
 import {
     buildFeedbackSuggestion,
     calculateEditIntensity,
@@ -71,6 +72,7 @@ type GeneratedTweetRow = {
     id: string;
     content: string;
     status: string;
+    generation_mode: GeneratedTweetMode;
     theses: string[] | null;
     alternates:
         | Array<{
@@ -676,13 +678,19 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
     }
 }
 
-export async function getPendingTweets() {
+export async function getPendingTweets(mode: GeneratedTweetMode = 'general') {
     try {
-        const { data: tweets, error } = await supabase
+        let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, theses, alternates, rationale, created_at')
+            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
             .eq('status', 'PENDING')
             .order('created_at', { ascending: false });
+
+        if (mode) {
+            query = query.eq('generation_mode', mode);
+        }
+
+        const { data: tweets, error } = await query;
 
         if (error) {
             return { success: false, error: 'Failed to fetch pending tweets.', data: null };
@@ -783,13 +791,19 @@ export async function getAllIdeas() {
     }
 }
 
-export async function getTweetHistory() {
+export async function getTweetHistory(mode: GeneratedTweetMode | 'all' = 'all') {
     try {
-        const { data: tweets, error } = await supabase
+        let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, theses, alternates, rationale, created_at')
+            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
             .neq('status', 'PENDING')
             .order('created_at', { ascending: false });
+
+        if (mode !== 'all') {
+            query = query.eq('generation_mode', mode);
+        }
+
+        const { data: tweets, error } = await query;
 
         if (error) {
             return { success: false, error: 'Failed to fetch tweet history.', data: null };
