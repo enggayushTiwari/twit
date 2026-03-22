@@ -101,6 +101,38 @@ type EventCaptureInput = {
     sourceText?: string;
 };
 
+async function ensureUserProfileRow() {
+    const { data: existingProfile, error: existingError } = await supabase
+        .from('user_profile')
+        .select('id, desired_perception, target_audience, tone_guardrails, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (!existingError && existingProfile) {
+        return existingProfile as ProfileRow;
+    }
+
+    const { data: insertedProfile, error: insertError } = await supabase
+        .from('user_profile')
+        .insert([
+            {
+                desired_perception: '',
+                target_audience: '',
+                tone_guardrails: '',
+                updated_at: new Date().toISOString(),
+            },
+        ])
+        .select('id, desired_perception, target_audience, tone_guardrails, updated_at')
+        .single();
+
+    if (insertError || !insertedProfile) {
+        throw new Error('Failed to initialize profile.');
+    }
+
+    return insertedProfile as ProfileRow;
+}
+
 function clampConfidence(value: number) {
     if (Number.isNaN(value)) {
         return 0.5;
@@ -728,6 +760,11 @@ export async function deleteGeneratedTweet(id: string) {
             .eq('context_ref_type', 'generated_tweet')
             .eq('context_ref_id', id);
 
+        await supabase
+            .from('draft_feedback')
+            .delete()
+            .eq('generated_tweet_id', id);
+
         const { data, error } = await supabase
             .from('generated_tweets')
             .delete()
@@ -880,17 +917,8 @@ export async function analyzePersona() {
 
 export async function getProfile() {
     try {
-        const { data: profile, error } = await supabase
-            .from('user_profile')
-            .select('id, desired_perception, target_audience, tone_guardrails, updated_at')
-            .limit(1)
-            .single();
-
-        if (error) {
-            return { success: false, error: 'Failed to fetch profile.', data: null };
-        }
-
-        return { success: true, data: profile as ProfileRow, error: null };
+        const profile = await ensureUserProfileRow();
+        return { success: true, data: profile, error: null };
     } catch (err: unknown) {
         return { success: false, error: getErrorMessage(err, 'An unexpected error occurred.'), data: null };
     }
@@ -903,35 +931,33 @@ export async function updateProfile(data: {
     tone_guardrails: string;
 }) {
     try {
-        if (data.id) {
-            const { error } = await supabase
+        const ensuredProfile = await ensureUserProfileRow();
+        const payload = {
+            desired_perception: data.desired_perception,
+            target_audience: data.target_audience,
+            tone_guardrails: data.tone_guardrails,
+            updated_at: new Date().toISOString(),
+        };
+
+        let { data: updatedRows, error } = await supabase
+            .from('user_profile')
+            .update(payload)
+            .eq('id', data.id || ensuredProfile.id)
+            .select('id');
+
+        if ((!updatedRows || updatedRows.length === 0) && (!data.id || data.id !== ensuredProfile.id)) {
+            ({ data: updatedRows, error } = await supabase
                 .from('user_profile')
-                .update({
-                    desired_perception: data.desired_perception,
-                    target_audience: data.target_audience,
-                    tone_guardrails: data.tone_guardrails,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', data.id);
-
-            if (error) {
-                return { success: false, error: 'Failed to update profile.' };
-            }
-        } else {
-            const { error } = await supabase.from('user_profile').insert([
-                {
-                    desired_perception: data.desired_perception,
-                    target_audience: data.target_audience,
-                    tone_guardrails: data.tone_guardrails,
-                    updated_at: new Date().toISOString(),
-                },
-            ]);
-
-            if (error) {
-                return { success: false, error: 'Failed to create profile.' };
-            }
+                .update(payload)
+                .eq('id', ensuredProfile.id)
+                .select('id'));
         }
 
+        if (error || !updatedRows || updatedRows.length === 0) {
+            return { success: false, error: 'Failed to update profile.' };
+        }
+
+        revalidatePath('/');
         revalidatePath('/profile');
         return { success: true };
     } catch (err: unknown) {

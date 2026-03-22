@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import Link from 'next/link';
 import { deleteGeneratedTweet } from '../actions';
 import {
@@ -81,6 +81,17 @@ export default function StartupWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [profile, setProfile] = useState<StartupProfile | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    startup_name: '',
+    one_liner: '',
+    target_customer: '',
+    painful_problem: '',
+    transformation: '',
+    positioning: '',
+    proof_points: '',
+    objections: '',
+    language_guardrails: '',
+  });
   const [memoryEntries, setMemoryEntries] = useState<StartupMemoryEntry[]>([]);
   const [pendingReflection, setPendingReflection] = useState<StartupReflectionTurn | null>(null);
   const [recentDrafts, setRecentDrafts] = useState<StartupDraftRecord[]>([]);
@@ -100,6 +111,17 @@ export default function StartupWorkspacePage() {
       }
 
       setProfile(result.data.profile);
+      setProfileForm({
+        startup_name: result.data.profile?.startup_name || '',
+        one_liner: result.data.profile?.one_liner || '',
+        target_customer: result.data.profile?.target_customer || '',
+        painful_problem: result.data.profile?.painful_problem || '',
+        transformation: result.data.profile?.transformation || '',
+        positioning: result.data.profile?.positioning || '',
+        proof_points: result.data.profile?.proof_points || '',
+        objections: result.data.profile?.objections || '',
+        language_guardrails: result.data.profile?.language_guardrails || '',
+      });
       setMemoryEntries(result.data.memoryEntries);
       setPendingReflection(result.data.pendingReflection);
       setRecentDrafts(result.data.recentDrafts);
@@ -109,22 +131,6 @@ export default function StartupWorkspacePage() {
     void loadWorkspace();
   }, []);
 
-  const form = useMemo(
-    () => ({
-      id: profile?.id || '',
-      startup_name: profile?.startup_name || '',
-      one_liner: profile?.one_liner || '',
-      target_customer: profile?.target_customer || '',
-      painful_problem: profile?.painful_problem || '',
-      transformation: profile?.transformation || '',
-      positioning: profile?.positioning || '',
-      proof_points: profile?.proof_points || '',
-      objections: profile?.objections || '',
-      language_guardrails: profile?.language_guardrails || '',
-    }),
-    [profile]
-  );
-
   async function refreshWorkspace() {
     const result = await getStartupWorkspace();
     if (!result.success || !result.data) {
@@ -132,6 +138,17 @@ export default function StartupWorkspacePage() {
     }
 
     setProfile(result.data.profile);
+    setProfileForm({
+      startup_name: result.data.profile?.startup_name || '',
+      one_liner: result.data.profile?.one_liner || '',
+      target_customer: result.data.profile?.target_customer || '',
+      painful_problem: result.data.profile?.painful_problem || '',
+      transformation: result.data.profile?.transformation || '',
+      positioning: result.data.profile?.positioning || '',
+      proof_points: result.data.profile?.proof_points || '',
+      objections: result.data.profile?.objections || '',
+      language_guardrails: result.data.profile?.language_guardrails || '',
+    });
     setMemoryEntries(result.data.memoryEntries);
     setPendingReflection(result.data.pendingReflection);
     setRecentDrafts(result.data.recentDrafts);
@@ -146,6 +163,17 @@ export default function StartupWorkspacePage() {
         }
 
         setProfile(result.data.profile);
+        setProfileForm({
+          startup_name: result.data.profile?.startup_name || '',
+          one_liner: result.data.profile?.one_liner || '',
+          target_customer: result.data.profile?.target_customer || '',
+          painful_problem: result.data.profile?.painful_problem || '',
+          transformation: result.data.profile?.transformation || '',
+          positioning: result.data.profile?.positioning || '',
+          proof_points: result.data.profile?.proof_points || '',
+          objections: result.data.profile?.objections || '',
+          language_guardrails: result.data.profile?.language_guardrails || '',
+        });
         setMemoryEntries(result.data.memoryEntries);
         setPendingReflection(result.data.pendingReflection);
         setRecentDrafts(result.data.recentDrafts);
@@ -156,26 +184,30 @@ export default function StartupWorkspacePage() {
     return () => window.removeEventListener('autogen:completed', handleAutoGenerationCompleted);
   }, []);
 
+  function handleProfileFieldChange(
+    field: keyof typeof profileForm,
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) {
+    const value = event.target.value;
+    setProfileForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  }
+
   async function handleProfileSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!profile?.id) {
-      setError('Startup profile is missing.');
-      return;
-    }
-
-    const formData = new FormData(event.currentTarget);
-    const payload: StartupProfile = {
-      id: profile.id,
-      startup_name: String(formData.get('startup_name') || ''),
-      one_liner: String(formData.get('one_liner') || ''),
-      target_customer: String(formData.get('target_customer') || ''),
-      painful_problem: String(formData.get('painful_problem') || ''),
-      transformation: String(formData.get('transformation') || ''),
-      positioning: String(formData.get('positioning') || ''),
-      proof_points: String(formData.get('proof_points') || ''),
-      objections: String(formData.get('objections') || ''),
-      language_guardrails: String(formData.get('language_guardrails') || ''),
-      updated_at: profile.updated_at,
+    const payload = {
+      id: profile?.id,
+      startup_name: profileForm.startup_name,
+      one_liner: profileForm.one_liner,
+      target_customer: profileForm.target_customer,
+      painful_problem: profileForm.painful_problem,
+      transformation: profileForm.transformation,
+      positioning: profileForm.positioning,
+      proof_points: profileForm.proof_points,
+      objections: profileForm.objections,
+      language_guardrails: profileForm.language_guardrails,
     };
 
     setSavingProfile(true);
@@ -189,15 +221,7 @@ export default function StartupWorkspacePage() {
       return;
     }
 
-    setProfile((previous) =>
-      previous
-        ? {
-            ...previous,
-            ...payload,
-            updated_at: new Date().toISOString(),
-          }
-        : previous
-    );
+    await refreshWorkspace();
     setToast('Startup profile updated.');
     window.setTimeout(() => setToast(null), 2500);
   }
@@ -410,55 +434,64 @@ export default function StartupWorkspacePage() {
             <div className="mt-5 grid gap-4">
               <input
                 name="startup_name"
-                defaultValue={form.startup_name}
+                value={profileForm.startup_name}
+                onChange={(event) => handleProfileFieldChange('startup_name', event)}
                 placeholder="Startup name"
                 className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="one_liner"
-                defaultValue={form.one_liner}
+                value={profileForm.one_liner}
+                onChange={(event) => handleProfileFieldChange('one_liner', event)}
                 placeholder="One-liner: what is this startup in plain language?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="target_customer"
-                defaultValue={form.target_customer}
+                value={profileForm.target_customer}
+                onChange={(event) => handleProfileFieldChange('target_customer', event)}
                 placeholder="Target customer"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="painful_problem"
-                defaultValue={form.painful_problem}
+                value={profileForm.painful_problem}
+                onChange={(event) => handleProfileFieldChange('painful_problem', event)}
                 placeholder="What painful problem are you solving?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="transformation"
-                defaultValue={form.transformation}
+                value={profileForm.transformation}
+                onChange={(event) => handleProfileFieldChange('transformation', event)}
                 placeholder="What changes for the user after using it?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="positioning"
-                defaultValue={form.positioning}
+                value={profileForm.positioning}
+                onChange={(event) => handleProfileFieldChange('positioning', event)}
                 placeholder="How should it be positioned?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="proof_points"
-                defaultValue={form.proof_points}
+                value={profileForm.proof_points}
+                onChange={(event) => handleProfileFieldChange('proof_points', event)}
                 placeholder="Proof points, traction, examples"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="objections"
-                defaultValue={form.objections}
+                value={profileForm.objections}
+                onChange={(event) => handleProfileFieldChange('objections', event)}
                 placeholder="What objection would a skeptical person raise?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="language_guardrails"
-                defaultValue={form.language_guardrails}
+                value={profileForm.language_guardrails}
+                onChange={(event) => handleProfileFieldChange('language_guardrails', event)}
                 placeholder="Language guardrails: what jargon should it avoid, what words should it prefer?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />

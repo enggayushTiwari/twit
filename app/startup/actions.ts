@@ -60,6 +60,48 @@ type StartupReflectionTurnRow = {
     created_at: string;
 };
 
+async function ensureStartupProfileRow() {
+    const { data: existingProfile, error: existingError } = await supabase
+        .from('startup_profiles')
+        .select(
+            'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
+        )
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (!existingError && existingProfile) {
+        return existingProfile as StartupProfileRow;
+    }
+
+    const { data: insertedProfile, error: insertError } = await supabase
+        .from('startup_profiles')
+        .insert([
+            {
+                startup_name: '',
+                one_liner: '',
+                target_customer: '',
+                painful_problem: '',
+                transformation: '',
+                positioning: '',
+                proof_points: '',
+                objections: '',
+                language_guardrails: '',
+                updated_at: new Date().toISOString(),
+            },
+        ])
+        .select(
+            'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
+        )
+        .single();
+
+    if (insertError || !insertedProfile) {
+        throw new Error('Failed to initialize startup profile.');
+    }
+
+    return insertedProfile as StartupProfileRow;
+}
+
 function mapStartupMemoryEntry(row: StartupMemoryEntryRow): StartupMemoryEntry {
     return {
         ...row,
@@ -232,15 +274,9 @@ Rules:
 
 export async function getStartupWorkspace() {
     try {
-        const [{ data: profile }, { data: memoryEntries }, pendingReflectionResult, { data: recentDrafts }] =
+        const [profile, { data: memoryEntries }, pendingReflectionResult, { data: recentDrafts }] =
             await Promise.all([
-                supabase
-                    .from('startup_profiles')
-                    .select(
-                        'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
-                    )
-                    .limit(1)
-                    .single(),
+                ensureStartupProfileRow(),
                 supabase
                     .from('startup_memory_entries')
                     .select('id, content, kind, metadata, created_at')
@@ -266,7 +302,7 @@ export async function getStartupWorkspace() {
         return {
             success: true,
             data: {
-                profile: (profile || null) as StartupProfileRow | null,
+                profile: profile || null,
                 memoryEntries: ((memoryEntries || []) as StartupMemoryEntryRow[]).map(mapStartupMemoryEntry),
                 pendingReflection: pendingReflectionResult,
                 recentAnsweredReflections: ((recentAnswered || []) as StartupReflectionTurnRow[]).map(
@@ -294,8 +330,11 @@ export async function getStartupWorkspace() {
     }
 }
 
-export async function updateStartupProfile(input: Omit<StartupProfile, 'updated_at'>) {
+export async function updateStartupProfile(
+    input: Omit<StartupProfile, 'updated_at' | 'id'> & { id?: string }
+) {
     try {
+        const existingProfile = await ensureStartupProfileRow();
         const payload = {
             startup_name: input.startup_name.trim(),
             one_liner: input.one_liner.trim(),
@@ -309,9 +348,21 @@ export async function updateStartupProfile(input: Omit<StartupProfile, 'updated_
             updated_at: new Date().toISOString(),
         };
 
-        const { error } = await supabase.from('startup_profiles').update(payload).eq('id', input.id);
+        let { data: updatedRows, error } = await supabase
+            .from('startup_profiles')
+            .update(payload)
+            .eq('id', input.id || existingProfile.id)
+            .select('id');
 
-        if (error) {
+        if ((!updatedRows || updatedRows.length === 0) && (!input.id || input.id !== existingProfile.id)) {
+            ({ data: updatedRows, error } = await supabase
+                .from('startup_profiles')
+                .update(payload)
+                .eq('id', existingProfile.id)
+                .select('id'));
+        }
+
+        if (error || !updatedRows || updatedRows.length === 0) {
             return { success: false, error: 'Failed to update startup profile.' };
         }
 
@@ -344,14 +395,8 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
             return { success: false, error: 'This startup memory is already saved.' };
         }
 
-        const [{ data: profile }, embeddingResponse] = await Promise.all([
-            supabase
-                .from('startup_profiles')
-                .select(
-                    'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
-                )
-                .limit(1)
-                .single(),
+        const [profile, embeddingResponse] = await Promise.all([
+            ensureStartupProfileRow(),
             aiBeta.models.embedContent({
                 model: EMBEDDING_MODEL,
                 contents: trimmedContent,
@@ -366,7 +411,7 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
             };
         }
 
-        const startupProfile = (profile || null) as StartupProfile | null;
+        const startupProfile = profile || null;
         const suggestion = await extractStartupCaptureIntelligence({
             content: trimmedContent,
             kind,
@@ -474,13 +519,7 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
             return { success: false, error: 'Related startup memory was not found.' };
         }
 
-        const { data: profile } = await supabase
-            .from('startup_profiles')
-            .select(
-                'id, startup_name, one_liner, target_customer, painful_problem, transformation, positioning, proof_points, objections, language_guardrails, updated_at'
-            )
-            .limit(1)
-            .single();
+        const profile = await ensureStartupProfileRow();
 
         const parsedEntry = mapStartupMemoryEntry(memoryRow as StartupMemoryEntryRow);
         const derived = await deriveStartupReflectionSummary({
@@ -488,7 +527,7 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
             answer: answer.trim(),
             content: parsedEntry.content,
             kind: parsedEntry.kind,
-            profile: (profile || null) as StartupProfile | null,
+            profile: profile || null,
         });
 
         const nextSuggestedPoints = Array.from(

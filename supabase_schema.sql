@@ -1,7 +1,7 @@
--- IDEA ENGINE: CANONICAL SUPABASE SCHEMA
+-- IDEA ENGINE: UNIFIED SUPABASE SCHEMA
 -- This file is the single source of truth for the current product shape.
--- It is written to be rerunnable against an existing project where the early
--- tables already exist.
+-- Includes database repair/idempotency columns and fixes.
+-- It is written to be rerunnable against an existing project where the early tables already exist.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -29,11 +29,12 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
   created_at timestamp with time zone DEFAULT now()
 );
 
-ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'PENDING';
-ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general';
-ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb;
-ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb;
-ALTER TABLE generated_tweets ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '';
+ALTER TABLE generated_tweets 
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'PENDING',
+  ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general',
+  ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '';
 
 DO $$
 BEGIN
@@ -69,6 +70,12 @@ CREATE TABLE IF NOT EXISTS user_profile (
   updated_at timestamp with time zone DEFAULT now()
 );
 
+ALTER TABLE user_profile
+  ADD COLUMN IF NOT EXISTS desired_perception text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS target_audience text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS tone_guardrails text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+
 CREATE TABLE IF NOT EXISTS creator_personas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   handle text NOT NULL,
@@ -90,6 +97,18 @@ CREATE TABLE IF NOT EXISTS startup_profiles (
   language_guardrails text NOT NULL DEFAULT '',
   updated_at timestamp with time zone DEFAULT now()
 );
+
+ALTER TABLE startup_profiles
+  ADD COLUMN IF NOT EXISTS startup_name text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS one_liner text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS target_customer text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS painful_problem text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS transformation text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS positioning text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS proof_points text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS objections text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS language_guardrails text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS startup_memory_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -229,6 +248,14 @@ CREATE TABLE IF NOT EXISTS draft_feedback (
   created_at timestamp with time zone DEFAULT now()
 );
 
+ALTER TABLE draft_feedback
+  ADD COLUMN IF NOT EXISTS decision text NOT NULL DEFAULT 'approved',
+  ADD COLUMN IF NOT EXISTS original_content text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS edited_content text,
+  ADD COLUMN IF NOT EXISTS feedback_tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS freeform_note text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
+
 CREATE TABLE IF NOT EXISTS event_reflections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   headline text NOT NULL DEFAULT '',
@@ -268,16 +295,20 @@ ALTER TABLE event_reflections ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow anonymous inserts" ON raw_ideas;
 DROP POLICY IF EXISTS "Allow anonymous reads" ON raw_ideas;
 DROP POLICY IF EXISTS "Allow anonymous deletions on raw_ideas" ON raw_ideas;
+DROP POLICY IF EXISTS "Allow anonymous updates on raw_ideas" ON raw_ideas;
 CREATE POLICY "Allow anonymous inserts" ON raw_ideas FOR INSERT TO public WITH CHECK (true);
 CREATE POLICY "Allow anonymous reads" ON raw_ideas FOR SELECT TO public USING (true);
+CREATE POLICY "Allow anonymous updates on raw_ideas" ON raw_ideas FOR UPDATE TO public USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anonymous deletions on raw_ideas" ON raw_ideas FOR DELETE TO public USING (true);
 
 DROP POLICY IF EXISTS "Allow anonymous reads on tweets" ON generated_tweets;
 DROP POLICY IF EXISTS "Allow anonymous inserts on tweets" ON generated_tweets;
 DROP POLICY IF EXISTS "Allow anonymous updates on tweets" ON generated_tweets;
+DROP POLICY IF EXISTS "Allow anonymous deletions on tweets" ON generated_tweets;
 CREATE POLICY "Allow anonymous reads on tweets" ON generated_tweets FOR SELECT TO public USING (true);
 CREATE POLICY "Allow anonymous inserts on tweets" ON generated_tweets FOR INSERT TO public WITH CHECK (true);
 CREATE POLICY "Allow anonymous updates on tweets" ON generated_tweets FOR UPDATE TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow anonymous deletions on tweets" ON generated_tweets FOR DELETE TO public USING (true);
 
 DROP POLICY IF EXISTS "Allow anonymous full access to user_profile" ON user_profile;
 CREATE POLICY "Allow anonymous full access to user_profile" ON user_profile FOR ALL TO public USING (true) WITH CHECK (true);
@@ -366,8 +397,8 @@ GRANT EXECUTE ON FUNCTION match_startup_memory TO anon;
 GRANT EXECUTE ON FUNCTION match_startup_memory TO authenticated;
 GRANT EXECUTE ON FUNCTION match_startup_memory TO service_role;
 
-INSERT INTO user_profile (desired_perception, target_audience, tone_guardrails)
-SELECT '', '', ''
+INSERT INTO user_profile (desired_perception, target_audience, tone_guardrails, updated_at)
+SELECT '', '', '', now()
 WHERE NOT EXISTS (SELECT 1 FROM user_profile);
 
 INSERT INTO startup_profiles (
@@ -379,7 +410,8 @@ INSERT INTO startup_profiles (
   positioning,
   proof_points,
   objections,
-  language_guardrails
+  language_guardrails,
+  updated_at
 )
-SELECT '', '', '', '', '', '', '', '', ''
+SELECT '', '', '', '', '', '', '', '', '', now()
 WHERE NOT EXISTS (SELECT 1 FROM startup_profiles);
