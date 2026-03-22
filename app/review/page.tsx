@@ -298,31 +298,15 @@ export default function ReviewDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] p-6 text-zinc-100 sm:p-12">
+    <div className="min-h-screen bg-[#050505] p-4 pb-24 text-zinc-100 sm:p-12">
       <div className="mx-auto max-w-4xl">
         <header className="border-b border-zinc-900 pb-8">
-          <div className="flex items-center justify-between gap-6">
-            <div>
-              <h1 className="text-2xl font-medium tracking-tight">Review Drafts</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-500">
-                Approvals, edits, rejections, and what felt off all feed back into the system as
-                taste signals.
-              </p>
-            </div>
-            <div className="flex items-center gap-4 text-sm font-medium">
-              <Link href="/vault" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Knowledge Vault
-              </Link>
-              <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Mind Model
-              </Link>
-              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Startup Workspace
-              </Link>
-              <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                &larr; Back to Capture
-              </Link>
-            </div>
+          <div>
+            <h1 className="text-2xl font-medium tracking-tight">Review Drafts</h1>
+            <p className="mt-3 text-sm leading-relaxed text-zinc-500 sm:max-w-2xl">
+              Approvals, edits, rejections, and what felt off all feed back into the system as
+              taste signals.
+            </p>
           </div>
 
           <div className="mt-5 flex w-fit items-center gap-1 rounded-lg bg-zinc-900/50 p-1">

@@ -355,31 +355,18 @@ export default function StartupWorkspacePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] px-6 py-12 text-zinc-100">
+    <div className="min-h-screen bg-[#050505] p-4 pb-24 text-zinc-100 sm:p-12">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
         <header className="border-b border-zinc-900 pb-8">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <h1 className="text-2xl font-medium tracking-tight text-zinc-100">
-                Startup Workspace
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-zinc-500">
-                This is a separate memory lane for the startup you are actively building. It learns
-                how to explain the product to broader people, then generates startup-specific tweets
-                without mixing in the general vault.
-              </p>
-            </div>
-            <div className="flex items-center gap-4 text-sm font-medium">
-              <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Capture
-              </Link>
-              <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Mind Model
-              </Link>
-              <Link href="/review" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Review Drafts
-              </Link>
-            </div>
+          <div>
+            <h1 className="text-2xl font-medium tracking-tight text-zinc-100">
+              Startup Workspace
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-zinc-500 sm:max-w-3xl">
+              This is a separate memory lane for the startup you are actively building. It learns
+              how to explain the product to broader people, then generates startup-specific tweets
+              without mixing in the general vault.
+            </p>
           </div>
         </header>
 

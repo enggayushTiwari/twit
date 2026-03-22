@@ -70,26 +70,13 @@ export default function VaultPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col p-6 sm:p-12">
+        <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col p-4 pb-24 sm:p-12">
             <header className="max-w-4xl mx-auto w-full border-b border-zinc-900 pb-8 mb-8">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-indigo-500/20 flex items-center justify-center">
-                            <Database className="w-4 h-4 text-indigo-400" />
-                        </div>
-                        <h1 className="text-2xl font-medium tracking-tight">Knowledge Vault</h1>
+                <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-indigo-500/20 flex items-center justify-center">
+                        <Database className="w-4 h-4 text-indigo-400" />
                     </div>
-                    <div className="flex items-center gap-4">
-                        <Link href="/profile" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            Define Persona
-                        </Link>
-                        <Link href="/review" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            Review Drafts
-                        </Link>
-                        <Link href="/" className="text-zinc-500 hover:text-zinc-300 text-sm font-medium transition-colors">
-                            &larr; Capture
-                        </Link>
-                    </div>
+                    <h1 className="text-2xl font-medium tracking-tight">Knowledge Vault</h1>
                 </div>
                 <p className="text-zinc-500 mt-3 leading-relaxed">
                     All your raw inputs, project dumps, and ideas in one place.

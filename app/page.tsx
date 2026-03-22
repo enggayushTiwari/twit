@@ -367,31 +367,15 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] px-6 py-12 text-zinc-100 selection:bg-zinc-800">
+    <div className="min-h-screen bg-[#050505] p-4 pb-24 sm:p-12 text-zinc-100 selection:bg-zinc-800">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
         <header className="border-b border-zinc-900 pb-8">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <h1 className="text-2xl font-medium tracking-tight text-zinc-100">Idea Engine</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-500">
-                Capture raw thoughts, reflect on events, and let the system gradually learn your
-                worldview instead of waiting for a perfectly filled profile.
-              </p>
-            </div>
-            <div className="flex items-center gap-4 text-sm font-medium">
-              <Link href="/vault" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Knowledge Vault
-              </Link>
-              <Link href="/profile" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Mind Model
-              </Link>
-              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Startup Workspace
-              </Link>
-              <Link href="/review" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Review Drafts
-              </Link>
-            </div>
+          <div>
+            <h1 className="text-2xl font-medium tracking-tight text-zinc-100">Idea Engine</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-500">
+              Capture raw thoughts, reflect on events, and let the system gradually learn your
+              worldview instead of waiting for a perfectly filled profile.
+            </p>
           </div>
 
           <div className="mt-6 flex w-fit items-center gap-1 rounded-lg bg-zinc-900/50 p-1">

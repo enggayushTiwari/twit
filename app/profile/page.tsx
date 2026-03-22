@@ -320,35 +320,19 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] p-6 text-zinc-100 sm:p-12">
+    <div className="min-h-screen bg-[#050505] p-4 pb-24 text-zinc-100 sm:p-12">
       <div className="mx-auto max-w-5xl">
         <header className="border-b border-zinc-900 pb-8">
-          <div className="flex items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/20 to-orange-500/20">
-                <BrainCircuit className="h-5 w-5 text-amber-400" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-medium tracking-tight">Mind Model</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">
-                  Bootstrap your public voice here, but let the rest of the page become the living
-                  model of your beliefs, lenses, aversions, current obsessions, and event POVs.
-                </p>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/20 to-orange-500/20">
+              <BrainCircuit className="h-5 w-5 text-amber-400" />
             </div>
-            <div className="flex items-center gap-4 text-sm font-medium">
-              <Link href="/vault" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Knowledge Vault
-              </Link>
-              <Link href="/review" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Review Drafts
-              </Link>
-              <Link href="/startup" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                Startup Workspace
-              </Link>
-              <Link href="/" className="text-zinc-500 transition-colors hover:text-zinc-300">
-                &larr; Capture
-              </Link>
+            <div>
+              <h1 className="text-2xl font-medium tracking-tight">Mind Model</h1>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-500 sm:max-w-2xl">
+                Bootstrap your public voice here, but let the rest of the page become the living
+                model of your beliefs, lenses, aversions, current obsessions, and event POVs.
+              </p>
             </div>
           </div>
         </header>
