@@ -720,6 +720,32 @@ export async function updateTweetStatus(id: string, newContent: string, newStatu
     }
 }
 
+export async function deleteGeneratedTweet(id: string) {
+    try {
+        await supabase
+            .from('reflection_turns')
+            .delete()
+            .eq('context_ref_type', 'generated_tweet')
+            .eq('context_ref_id', id);
+
+        const { data, error } = await supabase
+            .from('generated_tweets')
+            .delete()
+            .eq('id', id)
+            .select('id');
+
+        if (error || !data || data.length === 0) {
+            return { success: false, error: 'Failed to delete generated tweet.' };
+        }
+
+        revalidatePath('/review');
+        revalidatePath('/startup');
+        return { success: true };
+    } catch (err: unknown) {
+        return { success: false, error: getErrorMessage(err, 'Failed to delete generated tweet.') };
+    }
+}
+
 export async function submitDraftDecision(input: DraftDecisionInput) {
     try {
         const filteredTags = normalizeStringArray(input.feedbackTags).filter((tag): tag is FeedbackTag =>

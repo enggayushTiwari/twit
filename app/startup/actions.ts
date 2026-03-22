@@ -428,6 +428,25 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
     }
 }
 
+export async function deleteStartupMemoryEntry(id: string) {
+    try {
+        const { data, error } = await supabase
+            .from('startup_memory_entries')
+            .delete()
+            .eq('id', id)
+            .select('id');
+
+        if (error || !data || data.length === 0) {
+            return { success: false, error: 'Failed to delete startup memory.' };
+        }
+
+        revalidatePath('/startup');
+        return { success: true };
+    } catch (err: unknown) {
+        return { success: false, error: getErrorMessage(err, 'Failed to delete startup memory.') };
+    }
+}
+
 export async function answerStartupReflectionTurn(id: string, answer: string) {
     if (!answer.trim()) {
         return { success: false, error: 'Answer cannot be empty.' };

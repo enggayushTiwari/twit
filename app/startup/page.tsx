@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { deleteGeneratedTweet } from '../actions';
 import {
   answerStartupReflectionTurn,
+  deleteStartupMemoryEntry,
   getStartupWorkspace,
   saveStartupMemoryEntry,
   skipStartupReflectionTurn,
   updateStartupProfile,
 } from './actions';
 import ReflectionPromptCard from '../ReflectionPromptCard';
-import { Loader2, Rocket, Save, Sparkles } from 'lucide-react';
+import { Loader2, Rocket, Save, Sparkles, Trash2 } from 'lucide-react';
 import {
   STARTUP_MEMORY_KINDS,
   getStartupMemoryKindLabel,
@@ -135,6 +137,25 @@ export default function StartupWorkspacePage() {
     setRecentDrafts(result.data.recentDrafts);
   }
 
+  useEffect(() => {
+    function handleAutoGenerationCompleted() {
+      void (async () => {
+        const result = await getStartupWorkspace();
+        if (!result.success || !result.data) {
+          return;
+        }
+
+        setProfile(result.data.profile);
+        setMemoryEntries(result.data.memoryEntries);
+        setPendingReflection(result.data.pendingReflection);
+        setRecentDrafts(result.data.recentDrafts);
+      })();
+    }
+
+    window.addEventListener('autogen:completed', handleAutoGenerationCompleted);
+    return () => window.removeEventListener('autogen:completed', handleAutoGenerationCompleted);
+  }, []);
+
   async function handleProfileSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile?.id) {
@@ -198,7 +219,7 @@ export default function StartupWorkspacePage() {
 
     setMemoryInput('');
     setMemoryEntries((previous) => [result.data.entry, ...previous].slice(0, 24));
-    setPendingReflection(result.data.reflection);
+    setPendingReflection((previous) => result.data?.reflection || previous);
     setLatestFocus(result.data.suggestion.communication_focus);
     setLatestSuggestedPoints(result.data.suggestion.suggested_points);
     setToast('Startup memory saved.');
@@ -263,6 +284,42 @@ export default function StartupWorkspacePage() {
     } finally {
       setGenerating(false);
     }
+  }
+
+  async function handleDeleteStartupMemory(entryId: string) {
+    const previousEntries = memoryEntries;
+    setMemoryEntries((current) => current.filter((entry) => entry.id !== entryId));
+    setError(null);
+
+    const result = await deleteStartupMemoryEntry(entryId);
+    if (!result.success) {
+      setMemoryEntries(previousEntries);
+      setError(getActionError(result, 'Failed to delete startup memory.'));
+      return;
+    }
+
+    if (pendingReflection?.startup_memory_entry_id === entryId) {
+      setPendingReflection(null);
+    }
+
+    setToast('Startup memory deleted.');
+    window.setTimeout(() => setToast(null), 2500);
+  }
+
+  async function handleDeleteStartupDraft(tweetId: string) {
+    const previousDrafts = recentDrafts;
+    setRecentDrafts((current) => current.filter((draft) => draft.id !== tweetId));
+    setError(null);
+
+    const result = await deleteGeneratedTweet(tweetId);
+    if (!result.success) {
+      setRecentDrafts(previousDrafts);
+      setError(getActionError(result, 'Failed to delete startup draft.'));
+      return;
+    }
+
+    setToast('Startup draft deleted.');
+    window.setTimeout(() => setToast(null), 2500);
   }
 
   if (loading) {
@@ -500,15 +557,25 @@ export default function StartupWorkspacePage() {
                   recentDrafts.slice(0, 4).map((draft) => (
                     <div key={draft.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
                       <div className="flex items-center justify-between gap-4">
-                        <span className="rounded-full border border-zinc-700 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-                          {draft.status.toLowerCase().replace(/_/g, ' ')}
-                        </span>
-                        <span className="text-xs text-zinc-600">
-                          {new Date(draft.created_at).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="rounded-full border border-zinc-700 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+                            {draft.status.toLowerCase().replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-xs text-zinc-600">
+                            {new Date(draft.created_at).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteStartupDraft(draft.id)}
+                          className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                          title="Delete startup draft"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                       <p className="mt-3 text-sm leading-relaxed text-zinc-300">{draft.content}</p>
                     </div>
@@ -533,13 +600,23 @@ export default function StartupWorkspacePage() {
               ) : (
                 memoryEntries.map((entry) => (
                   <div key={entry.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500">
-                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
-                        {getStartupMemoryKindLabel(entry.kind)}
-                      </span>
-                      {entry.metadata?.communication_focus ? (
-                        <span>{entry.metadata.communication_focus}</span>
-                      ) : null}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500">
+                        <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                          {getStartupMemoryKindLabel(entry.kind)}
+                        </span>
+                        {entry.metadata?.communication_focus ? (
+                          <span>{entry.metadata.communication_focus}</span>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteStartupMemory(entry.id)}
+                        className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                        title="Delete startup memory"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                     <p className="mt-3 text-sm leading-relaxed text-zinc-200">{entry.content}</p>
                     {entry.metadata?.suggested_points && entry.metadata.suggested_points.length > 0 ? (

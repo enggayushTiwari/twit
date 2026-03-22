@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import Link from 'next/link';
 import {
   answerReflectionTurn,
+  deleteGeneratedTweet,
   getPendingTweets,
   getReviewLearningState,
   getTweetHistory,
@@ -17,6 +18,7 @@ import {
   ExternalLink,
   Loader2,
   Sparkles,
+  Trash2,
   Twitter,
   X,
   XCircle,
@@ -123,6 +125,22 @@ export default function ReviewDashboard() {
     void loadHistoryTweets();
   }, [activeTab, historyMode]);
 
+  const handleAutoGenerationCompleted = useEffectEvent(() => {
+    void refreshPendingTweets(pendingMode);
+    if (activeTab === 'history') {
+      void refreshHistoryTweets(historyMode);
+    }
+  });
+
+  useEffect(() => {
+    function handleEvent() {
+      handleAutoGenerationCompleted();
+    }
+
+    window.addEventListener('autogen:completed', handleEvent);
+    return () => window.removeEventListener('autogen:completed', handleEvent);
+  }, []);
+
   async function handleGenerate() {
     setIsGenerating(true);
     setError(null);
@@ -218,6 +236,30 @@ export default function ReviewDashboard() {
         ? 'Draft approved and learned from.'
         : 'Draft rejected and logged as a taste signal.'
     );
+    window.setTimeout(() => setToast(null), 2800);
+  }
+
+  async function handleDeleteTweet(tweetId: string, surface: 'pending' | 'history') {
+    const previousPending = tweets;
+    const previousHistory = historyTweets;
+
+    if (surface === 'pending') {
+      setTweets((current) => current.filter((tweet) => tweet.id !== tweetId));
+    } else {
+      setHistoryTweets((current) => current.filter((tweet) => tweet.id !== tweetId));
+    }
+
+    setError(null);
+    const result = await deleteGeneratedTweet(tweetId);
+
+    if (!result.success) {
+      setTweets(previousPending);
+      setHistoryTweets(previousHistory);
+      setError(getActionError(result, 'Failed to delete tweet.'));
+      return;
+    }
+
+    setToast('Draft deleted.');
     window.setTimeout(() => setToast(null), 2800);
   }
 
@@ -344,6 +386,9 @@ export default function ReviewDashboard() {
                   ? 'Generate Startup Draft'
                   : 'Generate General Draft'}
               </button>
+              <span className="text-xs text-zinc-500">
+                Auto-generation also checks in every 4.5 hours while the app is active.
+              </span>
             </div>
           ) : null}
         </header>
@@ -397,6 +442,14 @@ export default function ReviewDashboard() {
                     <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                       {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteTweet(tweet.id, 'pending')}
+                      className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                      title="Delete draft"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                   <textarea
                     className="mb-4 min-h-[110px] w-full resize-none bg-transparent text-lg leading-relaxed text-zinc-200 outline-none"
@@ -575,6 +628,14 @@ export default function ReviewDashboard() {
                         <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                           {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteTweet(tweet.id, 'history')}
+                          className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
+                          title="Delete draft"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                       <p className="text-[15px] leading-relaxed text-zinc-300">{tweet.content}</p>
                       {tweet.rationale ? (
