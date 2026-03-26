@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useEffectEvent, useState } from 'react';
-import Link from 'next/link';
 import {
   answerReflectionTurn,
   deleteGeneratedTweet,
@@ -146,7 +145,7 @@ export default function ReviewDashboard() {
     setError(null);
 
     try {
-      const endpoint = pendingMode === 'startup' ? '/api/startup/generate' : '/api/generate';
+      const endpoint = pendingMode === 'build' || pendingMode === 'startup' ? '/api/build/generate' : '/api/generate';
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -160,8 +159,8 @@ export default function ReviewDashboard() {
 
       await refreshPendingTweets(pendingMode);
       setToast(
-        pendingMode === 'startup'
-          ? 'Generated a startup-specific draft set.'
+        pendingMode === 'build' || pendingMode === 'startup'
+          ? 'Generated a build-in-public draft set.'
           : 'Generated a thesis-ranked draft set.'
       );
       window.setTimeout(() => setToast(null), 2800);
@@ -337,7 +336,7 @@ export default function ReviewDashboard() {
           {activeTab === 'pending' ? (
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
-                {(['general', 'startup'] as const).map((mode) => (
+                {(['general', 'build'] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -348,7 +347,7 @@ export default function ReviewDashboard() {
                         : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    {mode === 'general' ? 'General' : 'Startup'}
+                    {mode === 'general' ? 'General' : 'Build'}
                   </button>
                 ))}
               </div>
@@ -366,8 +365,8 @@ export default function ReviewDashboard() {
                 {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 {isGenerating
                   ? 'Generating...'
-                  : pendingMode === 'startup'
-                  ? 'Generate Startup Draft'
+                  : pendingMode === 'build' || pendingMode === 'startup'
+                  ? 'Generate Build Draft'
                   : 'Generate General Draft'}
               </button>
               <span className="text-xs text-zinc-500">
@@ -406,8 +405,8 @@ export default function ReviewDashboard() {
           <div className="mt-8 space-y-6">
             {tweets.length === 0 && !error ? (
               <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
-                {pendingMode === 'startup'
-                  ? 'No pending startup drafts right now. Generate one from the startup workspace or here.'
+                {pendingMode === 'build' || pendingMode === 'startup'
+                  ? 'No pending build drafts right now. Generate one from the build workspace or here.'
                   : 'No pending general drafts right now. Generate a new thesis-led draft to start the loop.'}
               </div>
             ) : null}
@@ -424,8 +423,14 @@ export default function ReviewDashboard() {
                 >
                   <div className="mb-3 flex items-center gap-2 text-xs font-medium text-zinc-500">
                     <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
-                      {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
+                      {tweet.generation_mode === 'build' || tweet.generation_mode === 'startup' ? 'Build' : 'General'}
                     </span>
+                    {tweet.post_archetype ? (
+                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                        {tweet.post_archetype.replace(/_/g, ' ')}
+                      </span>
+                    ) : null}
+                    {tweet.surface_intent ? <span>{tweet.surface_intent.replace(/_/g, ' ')}</span> : null}
                     <button
                       type="button"
                       onClick={() => void handleDeleteTweet(tweet.id, 'pending')}
@@ -506,6 +511,27 @@ export default function ReviewDashboard() {
                     </div>
                   ) : null}
 
+                  {tweet.media_plan && tweet.media_plan.media_type && tweet.media_plan.media_type !== 'none' ? (
+                    <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Media Suggestion
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-300">
+                        {String(tweet.media_plan.media_type).replace(/_/g, ' ')}: {String(tweet.media_plan.media_reason || '')}
+                      </p>
+                      {tweet.media_plan.asset_brief ? (
+                        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                          {String(tweet.media_plan.asset_brief)}
+                        </p>
+                      ) : null}
+                      {tweet.media_plan.search_query ? (
+                        <p className="mt-2 text-xs font-mono leading-relaxed text-zinc-600">
+                          Search: {String(tweet.media_plan.search_query)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                       What felt off or right?
@@ -571,7 +597,7 @@ export default function ReviewDashboard() {
         ) : (
           <div className="mt-8 space-y-4">
             <div className="flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
-              {(['all', 'general', 'startup'] as const).map((mode) => (
+              {(['all', 'general', 'build'] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -582,7 +608,7 @@ export default function ReviewDashboard() {
                       : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
-                  {mode === 'all' ? 'All' : mode === 'general' ? 'General' : 'Startup'}
+                  {mode === 'all' ? 'All' : mode === 'general' ? 'General' : 'Build'}
                 </button>
               ))}
             </div>
@@ -610,8 +636,13 @@ export default function ReviewDashboard() {
                     <div className="flex-1">
                       <div className="mb-3 flex items-center gap-2 text-xs font-medium text-zinc-500">
                         <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
-                          {tweet.generation_mode === 'startup' ? 'Startup' : 'General'}
+                          {tweet.generation_mode === 'build' || tweet.generation_mode === 'startup' ? 'Build' : 'General'}
                         </span>
+                        {tweet.post_archetype ? (
+                          <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                            {tweet.post_archetype.replace(/_/g, ' ')}
+                          </span>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => void handleDeleteTweet(tweet.id, 'history')}
@@ -624,6 +655,11 @@ export default function ReviewDashboard() {
                       <p className="text-[15px] leading-relaxed text-zinc-300">{tweet.content}</p>
                       {tweet.rationale ? (
                         <p className="mt-3 text-sm leading-relaxed text-zinc-500">{tweet.rationale}</p>
+                      ) : null}
+                      {tweet.media_plan && tweet.media_plan.media_type && tweet.media_plan.media_type !== 'none' ? (
+                        <p className="mt-3 text-sm leading-relaxed text-zinc-500">
+                          Suggested media: {String(tweet.media_plan.media_type).replace(/_/g, ' ')}
+                        </p>
                       ) : null}
                     </div>
                     <span

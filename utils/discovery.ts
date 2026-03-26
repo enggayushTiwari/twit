@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import type { DiscoveryCountryId, DiscoveryTopicId } from './discovery-config';
+import { recommendTopicArchetype } from './post-strategy.js';
+import type { PostArchetype } from './self-model';
 
 const DISCOVERY_COUNTRY_RUNTIME = {
   worldwide: {
@@ -95,6 +97,10 @@ export type LiveTopic = {
   country: DiscoveryCountryId;
   topic: DiscoveryTopicId;
   sourceType: 'news' | 'x';
+  recommendedArchetype: PostArchetype;
+  worldviewFitScore: number;
+  buildRelevanceScore: number;
+  postabilityScore: number;
 };
 
 function sanitizeText(value: string) {
@@ -154,6 +160,7 @@ export function parseGoogleNewsFeed(
     }
 
     topics.push({
+      ...recommendTopicArchetype({ kind: 'news', topic: params.topic, title }),
       id: createTopicId(`news-${params.country}-${params.topic}-${index}`, title),
       kind: 'news',
       title,
@@ -206,6 +213,7 @@ export function parseXTrendPayload(
           : 'Trending now on X';
 
       return {
+        ...recommendTopicArchetype({ kind: 'x_trend', topic: params.topic, title }),
         id: createTopicId(`x-${params.country}-${params.topic}-${index}`, title),
         kind: 'x_trend',
         title,

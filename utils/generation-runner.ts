@@ -4,9 +4,11 @@ import {
   buildAuthenticityCriticPrompt,
   buildCandidateGenerationPrompt,
   buildGenerationSystemPrompt,
+  buildMediaPlanPrompt,
   buildStartupCandidateGenerationPrompt,
   buildStartupCriticPrompt,
   buildStartupGenerationSystemPrompt,
+  normalizeMediaPlan,
 } from './generation';
 import { getErrorMessage } from './errors';
 import { parseJsonResponse } from './ai-json';
@@ -14,11 +16,15 @@ import { GENERATION_MODEL } from './ai-config';
 import type {
   GenerationCandidate,
   GenerationDraftSet,
+  MediaPlan,
   MindModelEntry,
+  PostArchetype,
   RankedGenerationResult,
+  SurfaceIntent,
   TweetAlternate,
 } from './self-model';
-import type { StartupProfile } from './startup';
+import { choosePostPlan } from './post-strategy';
+import type { GeneratedTweetMode, StartupProfile, BuildMemoryKind } from './startup';
 
 type RawIdeaRow = {
   id: string;
@@ -31,24 +37,29 @@ type IdeaMatch = {
   content: string;
 };
 
-type StartupMemoryRow = {
+type BuildMemoryRow = {
   id: string;
   content: string;
-  kind: string;
+  kind: BuildMemoryKind;
   metadata: {
     communication_focus?: string;
     suggested_points?: string[];
     follow_up_answer?: string;
+    generalizable_takeaway?: string;
+    takeaway_confidence?: number;
   } | null;
   embedding: number[] | null;
 };
 
-type StartupMemoryMatch = {
+type BuildMemoryMatch = {
   content: string;
 };
 
-type TweetContentRow = {
+type RecentTweetRow = {
   content: string;
+  post_archetype?: PostArchetype | null;
+  surface_intent?: SurfaceIntent | null;
+  created_at?: string;
 };
 
 type UserProfileRow = {
@@ -66,6 +77,27 @@ type RankedCandidate = GenerationCandidate & {
   draftIndex: number;
   score: number;
   critiqueReason: string;
+};
+
+type LiveTopicContext = {
+  title: string;
+  summary: string;
+} | null;
+
+type EventReflectionQueryClient = {
+  from: (table: 'event_reflections') => {
+    select: (columns: string) => {
+      in: (column: string, values: string[]) => {
+        order: (column: string, options: { ascending: boolean }) => {
+          limit: (count: number) => {
+            maybeSingle: () => Promise<{
+              data: { headline: string; source_summary: string | null } | null;
+            }>;
+          };
+        };
+      };
+    };
+  };
 };
 
 function createClients() {
@@ -161,7 +193,7 @@ function buildContextIdeas(seedIdea: string, relatedIdeas: IdeaMatch[] | null) {
     .join('\n\n');
 }
 
-function buildStartupContext(seedEntry: StartupMemoryRow, relatedEntries: StartupMemoryMatch[] | null) {
+function buildBuildContext(seedEntry: BuildMemoryRow, relatedEntries: BuildMemoryMatch[] | null) {
   const blocks = new Set<string>();
   const seedPoints = seedEntry.metadata?.suggested_points?.join('; ') || '';
   const seedFocus = seedEntry.metadata?.communication_focus || '';
@@ -169,10 +201,13 @@ function buildStartupContext(seedEntry: StartupMemoryRow, relatedEntries: Startu
 
   blocks.add(
     [
-      `Startup memory seed (${seedEntry.kind}): ${seedEntry.content}`,
+      `Build memory seed (${seedEntry.kind}): ${seedEntry.content}`,
       seedFocus ? `Communication focus: ${seedFocus}` : '',
       seedPoints ? `Suggested points: ${seedPoints}` : '',
       seedFollowUp ? `Founder clarification: ${seedFollowUp}` : '',
+      seedEntry.metadata?.generalizable_takeaway
+        ? `Generalizable takeaway: ${seedEntry.metadata.generalizable_takeaway}`
+        : '',
     ]
       .filter(Boolean)
       .join('\n')
@@ -186,7 +221,7 @@ function buildStartupContext(seedEntry: StartupMemoryRow, relatedEntries: Startu
   }
 
   return Array.from(blocks)
-    .map((block, index) => `Startup Context ${index + 1}:\n${block}`)
+    .map((block, index) => `Build Context ${index + 1}:\n${block}`)
     .join('\n\n');
 }
 
@@ -213,6 +248,59 @@ function buildRankedCandidates(
     .sort((left, right) => right.score - left.score);
 }
 
+async function getLatestLiveTopicContext(
+  supabase: EventReflectionQueryClient,
+  mode: GeneratedTweetMode
+) {
+  const { data } = await supabase
+    .from('event_reflections')
+    .select('headline, source_summary')
+    .in('status', ['captured', 'reflected'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const latestEvent = data as { headline: string; source_summary: string | null } | null;
+
+  if (!latestEvent?.headline) {
+    return null;
+  }
+
+  if (mode === 'build' && !/startup|product|customer|feature|launch|funding|ship|release/i.test(`${latestEvent.headline} ${latestEvent.source_summary || ''}`)) {
+    return null;
+  }
+
+  return {
+    title: latestEvent.headline,
+    summary: latestEvent.source_summary || '',
+  } satisfies LiveTopicContext;
+}
+
+async function planMediaForDraft(params: {
+  ai: GoogleGenAI;
+  draft: string;
+  archetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+}) {
+  const response = await params.ai.models.generateContent({
+    model: GENERATION_MODEL,
+    contents: buildMediaPlanPrompt({
+      selectedDraft: params.draft,
+      targetArchetype: params.archetype,
+      surfaceIntent: params.surfaceIntent,
+    }),
+    config: {
+      systemInstruction:
+        'You are a strict media planner. Return JSON only and prefer none when media would feel forced.',
+      temperature: 0.2,
+    },
+  });
+
+  return normalizeMediaPlan(
+    parseJsonResponse<MediaPlan>(response.text || '', 'Media planner returned invalid structured output')
+  );
+}
+
 export async function generateGeneralTweetDraft() {
   try {
     const { ai, supabase } = createClients();
@@ -232,7 +320,8 @@ export async function generateGeneralTweetDraft() {
 
     const { data: allIdeas } = await supabase
       .from('raw_ideas')
-      .select('id, content, embedding, type');
+      .select('id, content, embedding, type')
+      .neq('type', 'project_log');
 
     const validIdeas = ((allIdeas || []) as RawIdeaRow[])
       .map((idea) => ({ ...idea, embedding: ensureArray(idea.embedding) }))
@@ -284,11 +373,22 @@ export async function generateGeneralTweetDraft() {
 
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
-      .select('content')
+      .select('content, post_archetype, surface_intent, created_at')
       .eq('generation_mode', 'general')
       .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
       .order('created_at', { ascending: false })
       .limit(20);
+
+    const liveTopicContext = await getLatestLiveTopicContext(
+      supabase as unknown as EventReflectionQueryClient,
+      'general'
+    );
+    const postPlan = choosePostPlan({
+      mode: 'general',
+      recentPosts: ((recentTweets || []) as RecentTweetRow[]) || [],
+      hasLiveTopic: Boolean(liveTopicContext),
+      now: new Date(),
+    });
 
     const contextIdeas = buildContextIdeas(seedIdea.content, (relatedIdeas || []) as IdeaMatch[]);
     const systemPrompt = buildGenerationSystemPrompt({
@@ -297,7 +397,7 @@ export async function generateGeneralTweetDraft() {
       sourceType: seedIdea.type,
       contextIdeas,
       pastTweets:
-        ((recentTweets || []) as TweetContentRow[]).map((tweet) => tweet.content).join('\n') ||
+        ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.content).join('\n') ||
         'None',
       confirmedEntries: ((worldviewRows || []) as MindModelEntry[]) || [],
       currentObsessions: (obsessionRows || []).map((row) => row.statement).filter(Boolean),
@@ -306,7 +406,12 @@ export async function generateGeneralTweetDraft() {
 
     const generationResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildCandidateGenerationPrompt({ seedIdea: seedIdea.content }),
+      contents: buildCandidateGenerationPrompt({
+        seedIdea: seedIdea.content,
+        targetArchetype: postPlan.archetype,
+        surfaceIntent: postPlan.surfaceIntent,
+        liveTopicTitle: liveTopicContext?.title || null,
+      }),
       config: {
         systemInstruction: systemPrompt,
         temperature: 0.85,
@@ -326,7 +431,11 @@ export async function generateGeneralTweetDraft() {
 
     const criticResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildAuthenticityCriticPrompt(JSON.stringify(draftSet, null, 2)),
+      contents: buildAuthenticityCriticPrompt(
+        JSON.stringify(draftSet, null, 2),
+        postPlan.archetype,
+        postPlan.surfaceIntent
+      ),
       config: {
         systemInstruction:
           'You are a strict evaluator of authenticity. Return JSON only and never add prose outside the schema.',
@@ -366,6 +475,12 @@ export async function generateGeneralTweetDraft() {
     const rationaleParts = [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || ''].filter(
       Boolean
     );
+    const mediaPlan = await planMediaForDraft({
+      ai,
+      draft: selectedCandidate.draft,
+      archetype: postPlan.archetype,
+      surfaceIntent: postPlan.surfaceIntent,
+    });
 
     const { data: insertedTweet, error: insertError } = await supabase
       .from('generated_tweets')
@@ -377,9 +492,13 @@ export async function generateGeneralTweetDraft() {
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
+          post_archetype: postPlan.archetype,
+          surface_intent: postPlan.surfaceIntent,
+          media_plan: mediaPlan,
+          source_memory_scope: 'general',
         },
       ])
-      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
+      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -395,7 +514,7 @@ export async function generateGeneralTweetDraft() {
   }
 }
 
-export async function generateStartupTweetDraft() {
+export async function generateBuildTweetDraft() {
   try {
     const { ai, supabase } = createClients();
 
@@ -407,28 +526,28 @@ export async function generateStartupTweetDraft() {
       .limit(1)
       .maybeSingle();
 
-    const { data: allStartupMemory } = await supabase
-      .from('startup_memory_entries')
+    const { data: allBuildMemory } = await supabase
+      .from('build_memory_entries')
       .select('id, content, kind, metadata, embedding');
 
-    const validEntries = ((allStartupMemory || []) as StartupMemoryRow[])
+    const validEntries = ((allBuildMemory || []) as BuildMemoryRow[])
       .map((entry) => ({ ...entry, embedding: ensureArray(entry.embedding) }))
       .filter((entry) => entry.embedding.length > 0);
 
     if (validEntries.length === 0) {
-      throw new Error('Save some startup memory first so the startup generator has context.');
+      throw new Error('Save some build memory first so the build-in-public generator has context.');
     }
 
     const seedEntry = validEntries[Math.floor(Math.random() * validEntries.length)];
 
-    const { data: relatedEntries, error: matchError } = await supabase.rpc('match_startup_memory', {
+    const { data: relatedEntries, error: matchError } = await supabase.rpc('match_build_memory', {
       query_embedding: seedEntry.embedding,
       match_threshold: 0.1,
       match_count: 4,
     });
 
     if (matchError) {
-      throw new Error('Failed to retrieve related startup memory.');
+      throw new Error('Failed to retrieve related build memory.');
     }
 
     const { data: worldviewRows } = await supabase
@@ -441,8 +560,8 @@ export async function generateStartupTweetDraft() {
       .order('priority', { ascending: false })
       .limit(18);
 
-    const { data: startupReflectionRows } = await supabase
-      .from('startup_reflection_turns')
+    const { data: buildReflectionRows } = await supabase
+      .from('build_reflection_turns')
       .select('prompt, answer')
       .neq('answer', '')
       .neq('answer', '[skipped]')
@@ -451,31 +570,47 @@ export async function generateStartupTweetDraft() {
 
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
-      .select('content')
-      .eq('generation_mode', 'startup')
+      .select('content, post_archetype, surface_intent, created_at')
+      .in('generation_mode', ['build', 'startup'])
       .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
       .order('created_at', { ascending: false })
       .limit(16);
 
-    const startupContext = buildStartupContext(
+    const liveTopicContext = await getLatestLiveTopicContext(
+      supabase as unknown as EventReflectionQueryClient,
+      'build'
+    );
+    const postPlan = choosePostPlan({
+      mode: 'build',
+      recentPosts: ((recentTweets || []) as RecentTweetRow[]) || [],
+      hasLiveTopic: Boolean(liveTopicContext),
+      now: new Date(),
+    });
+
+    const startupContext = buildBuildContext(
       seedEntry,
-      (relatedEntries || []) as StartupMemoryMatch[]
+      (relatedEntries || []) as BuildMemoryMatch[]
     );
     const systemPrompt = buildStartupGenerationSystemPrompt({
       startupProfile: (startupProfile || null) as StartupProfile | null,
       startupContext,
       sharedMindModel: ((worldviewRows || []) as MindModelEntry[]) || [],
-      startupReflections: (startupReflectionRows || []).map(
+      startupReflections: (buildReflectionRows || []).map(
         (row) => `Prompt: ${row.prompt}\nAnswer: ${row.answer}`
       ),
       recentStartupTweets:
-        ((recentTweets || []) as TweetContentRow[]).map((tweet) => tweet.content).join('\n') ||
+        ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.content).join('\n') ||
         'None',
     });
 
     const generationResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildStartupCandidateGenerationPrompt({ seedIdea: seedEntry.content }),
+      contents: buildStartupCandidateGenerationPrompt({
+        seedIdea: seedEntry.content,
+        targetArchetype: postPlan.archetype,
+        surfaceIntent: postPlan.surfaceIntent,
+        liveTopicTitle: liveTopicContext?.title || null,
+      }),
       config: {
         systemInstruction: systemPrompt,
         temperature: 0.8,
@@ -495,7 +630,11 @@ export async function generateStartupTweetDraft() {
 
     const criticResponse = await ai.models.generateContent({
       model: GENERATION_MODEL,
-      contents: buildStartupCriticPrompt(JSON.stringify(draftSet, null, 2)),
+      contents: buildStartupCriticPrompt(
+        JSON.stringify(draftSet, null, 2),
+        postPlan.archetype,
+        postPlan.surfaceIntent
+      ),
       config: {
         systemInstruction:
           'You are a strict startup communication evaluator. Return JSON only and never add prose outside the schema.',
@@ -535,6 +674,12 @@ export async function generateStartupTweetDraft() {
     const rationaleParts = [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || ''].filter(
       Boolean
     );
+    const mediaPlan = await planMediaForDraft({
+      ai,
+      draft: selectedCandidate.draft,
+      archetype: postPlan.archetype,
+      surfaceIntent: postPlan.surfaceIntent,
+    });
 
     const { data: insertedTweet, error: insertError } = await supabase
       .from('generated_tweets')
@@ -542,24 +687,32 @@ export async function generateStartupTweetDraft() {
         {
           content: selectedCandidate.draft,
           status: 'PENDING',
-          generation_mode: 'startup',
+          generation_mode: 'build',
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
+          post_archetype: postPlan.archetype,
+          surface_intent: postPlan.surfaceIntent,
+          media_plan: mediaPlan,
+          source_memory_scope: 'build',
         },
       ])
-      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
+      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
-      throw new Error('Failed to save the startup draft.');
+      throw new Error('Failed to save the build draft.');
     }
 
     return { success: true as const, tweet: insertedTweet };
   } catch (error) {
     return {
       success: false as const,
-      error: getErrorMessage(error, 'An unexpected startup generation error occurred.'),
+      error: getErrorMessage(error, 'An unexpected build generation error occurred.'),
     };
   }
+}
+
+export async function generateStartupTweetDraft() {
+  return generateBuildTweetDraft();
 }

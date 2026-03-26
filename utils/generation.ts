@@ -1,4 +1,9 @@
-import type { MindModelEntry } from "./self-model";
+import type {
+  MediaPlan,
+  MindModelEntry,
+  PostArchetype,
+  SurfaceIntent,
+} from "./self-model";
 import type { StartupProfile } from "./startup";
 
 export type CreatorPersonaRecord = {
@@ -25,8 +30,11 @@ type BuildGenerationSystemPromptParams = {
 
 type BuildCandidatePromptParams = {
   seedIdea: string;
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
   thesisCount?: number;
   draftCount?: number;
+  liveTopicTitle?: string | null;
 };
 
 function getProfileLine(value: string | null | undefined, fallback: string) {
@@ -66,6 +74,53 @@ function formatStringList(items: string[] | undefined) {
   return items.join("\n");
 }
 
+function getArchetypeDirective(archetype: PostArchetype) {
+  switch (archetype) {
+    case "question":
+      return "Write like a sharp question that invites real conversation, not generic engagement bait.";
+    case "hard_statement":
+      return "Write like a clear, high-conviction statement with a strong point of view.";
+    case "counterintuitive_take":
+      return "Write like a surprising but defensible belief that reveals a deeper mechanism.";
+    case "build_update":
+      return "Write like a build-in-public update: what changed, what shipped, or what was learned while building.";
+    case "customer_insight":
+      return "Write like a customer or market insight that makes the problem or user behavior clearer.";
+    case "proof_point":
+      return "Write like proof: evidence, traction, concrete examples, or a credible signal.";
+    case "objection_handling":
+      return "Write like you are dissolving the most natural skeptical objection.";
+    case "founder_belief":
+      return "Write like a founder/operator belief that was earned through building, not generic advice.";
+    case "trend_reaction":
+      return "Write like a reaction to a current topic that reveals what you think the deeper story is.";
+    case "light_humor":
+      return "Write like a light, funny, knowing post that still sounds intelligent and in-character.";
+    case "thread_seed":
+      return "Write like the opening tweet of a thread: compact, sharp, and expandable.";
+    default:
+      return "Write in the user's authentic voice.";
+  }
+}
+
+function getSurfaceDirective(surfaceIntent: SurfaceIntent) {
+  switch (surfaceIntent) {
+    case "conversation_starter":
+      return "Optimize for replies and discussion without sounding needy.";
+    case "build_in_public":
+      return "Optimize for build-in-public credibility and clarity.";
+    case "news_reaction":
+      return "Optimize for timely interpretation, not summary.";
+    case "media_supported":
+      return "Write with room for a visual or GIF to do some of the work.";
+    case "thread_opener":
+      return "Write like it can naturally open a longer thread.";
+    case "feed_post":
+    default:
+      return "Optimize for standalone feed readability.";
+  }
+}
+
 export function buildGenerationSystemPrompt({
   profile,
   creatorPersona,
@@ -90,7 +145,7 @@ export function buildGenerationSystemPrompt({
   );
 
   return `You are a world-class Thought Modeler, Critical Thinker, and Brand Strategist.
-Your MISSION: generate tweet drafts that sound like the user would have written them, based on confirmed worldview, current obsessions, recent event POVs, and vault inspiration.
+Your MISSION: generate X posts that sound like the user would have written them, based on confirmed worldview, current obsessions, recent event POVs, and vault inspiration.
 
 <persona_guardrails>
 - DESIRED PUBLIC PERCEPTION: ${desiredPerception}
@@ -132,18 +187,28 @@ CRITICAL INSTRUCTIONS:
 2. Start from worldview, not from phrasing. The tweet should sound like a belief-led conclusion the user would reach.
 3. If worldview and source notes conflict, worldview wins.
 4. Prefer mechanism, incentives, systems, distribution, leverage, tradeoffs, or timing over shallow commentary.
-5. ZERO MODE COLLAPSE: do not repeat recent tweet structure, hook, or ending.
+5. ZERO MODE COLLAPSE: do not repeat recent post structure, hook, or ending.
 6. Every candidate must fit under 280 characters.
-7. Better to be specific and sharp than broad and safe.`;
+7. Better to be specific and sharp than broad and safe.
+8. Match the requested archetype and surface intent exactly instead of defaulting to generic wisdom-posting.`;
 }
 
 export function buildCandidateGenerationPrompt({
   seedIdea,
+  targetArchetype,
+  surfaceIntent,
   thesisCount = 4,
   draftCount = 3,
+  liveTopicTitle,
 }: BuildCandidatePromptParams) {
   return `Seed idea:
 ${seedIdea}
+
+Target post archetype: ${targetArchetype}
+Target surface intent: ${surfaceIntent}
+Archetype directive: ${getArchetypeDirective(targetArchetype)}
+Surface directive: ${getSurfaceDirective(surfaceIntent)}
+${liveTopicTitle ? `Live topic context: ${liveTopicTitle}` : ""}
 
 Return JSON only with this shape:
 {
@@ -161,10 +226,15 @@ Rules:
 - Generate ${thesisCount} theses and ${draftCount} tweet candidates.
 - Every thesis must be a distinct angle.
 - Every candidate draft must be under 280 characters.
+- Match the target archetype and surface, not just the topic.
 - "why_it_fits" should explain why the draft matches the user's worldview or taste, not why it sounds clever.`;
 }
 
-export function buildAuthenticityCriticPrompt(candidatesJson: string) {
+export function buildAuthenticityCriticPrompt(
+  candidatesJson: string,
+  targetArchetype: PostArchetype,
+  surfaceIntent: SurfaceIntent
+) {
   return `You are the user's authenticity critic.
 Rank the tweet candidates by how likely they are to be tweets the user would genuinely write.
 
@@ -175,6 +245,8 @@ Evaluate each candidate on:
 - non-generic phrasing
 - non-performative tone
 - distance from direct source-note copying
+- how well it executes the requested archetype: ${targetArchetype}
+- how well it fits the requested surface intent: ${surfaceIntent}
 
 Return JSON only:
 {
@@ -242,7 +314,7 @@ export function buildStartupGenerationSystemPrompt({
   );
 
   return `You are a world-class startup communicator and thought partner.
-Your mission is to generate tweets about ${startupName} that make the startup legible, compelling, and human to broader people.
+Your mission is to generate build-in-public X posts about ${startupName} that make the startup legible, compelling, and human to broader people.
 
 <startup_profile>
 - STARTUP: ${startupName}
@@ -279,16 +351,26 @@ CRITICAL INSTRUCTIONS:
 4. Use the shared worldview only as a taste and reasoning filter. Do not pull in unrelated general-vault ideas.
 5. Avoid builder jargon unless it is necessary and then explain it.
 6. Every draft must fit under 280 characters.
-7. Better to make the startup understandable than to make the tweet ornamental.`;
+7. Better to make the startup understandable than to make the post ornamental.
+8. Match the requested build archetype and surface intent exactly instead of defaulting to founder sermonizing.`;
 }
 
 export function buildStartupCandidateGenerationPrompt({
   seedIdea,
+  targetArchetype,
+  surfaceIntent,
   thesisCount = 4,
   draftCount = 3,
+  liveTopicTitle,
 }: BuildCandidatePromptParams) {
   return `Startup memory seed:
 ${seedIdea}
+
+Target post archetype: ${targetArchetype}
+Target surface intent: ${surfaceIntent}
+Archetype directive: ${getArchetypeDirective(targetArchetype)}
+Surface directive: ${getSurfaceDirective(surfaceIntent)}
+${liveTopicTitle ? `Live topic context: ${liveTopicTitle}` : ""}
 
 Return JSON only with this shape:
 {
@@ -306,10 +388,15 @@ Rules:
 - Generate ${thesisCount} theses and ${draftCount} tweet candidates.
 - Favor distinct startup communication angles such as problem clarity, customer transformation, objection handling, proof, and positioning.
 - Every draft must be under 280 characters.
+- Match the target archetype and surface, not just the startup topic.
 - "why_it_fits" must explain why the draft helps broader people understand the startup while still fitting the user's worldview.`;
 }
 
-export function buildStartupCriticPrompt(candidatesJson: string) {
+export function buildStartupCriticPrompt(
+  candidatesJson: string,
+  targetArchetype: PostArchetype,
+  surfaceIntent: SurfaceIntent
+) {
   return `You are a strict startup communication critic.
 Rank the tweet candidates by how likely they are to make the startup clearer, more compelling, and more authentic to the user.
 
@@ -320,6 +407,8 @@ Evaluate each candidate on:
 - authenticity to the user's worldview
 - avoidance of unnecessary builder jargon
 - usefulness for distribution
+- how well it executes the requested archetype: ${targetArchetype}
+- how well it fits the requested surface intent: ${surfaceIntent}
 
 Return JSON only:
 {
@@ -335,4 +424,65 @@ Return JSON only:
 
 Candidates:
 ${candidatesJson}`;
+}
+
+export function buildMediaPlanPrompt(params: {
+  selectedDraft: string;
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+}) {
+  return `You are a media planner for X posts.
+
+Draft:
+${params.selectedDraft}
+
+Target archetype: ${params.targetArchetype}
+Target surface intent: ${params.surfaceIntent}
+
+Return JSON only:
+{
+  "media_type": "none",
+  "media_reason": "...",
+  "asset_brief": "...",
+  "search_query": "...",
+  "confidence": 0.0
+}
+
+Rules:
+- Use one of: none, gif, screenshot, image, chart, short_video.
+- Default to none when media would feel forced.
+- GIFs are mainly for light humor or some trend reactions.
+- Screenshots are mainly for build updates.
+- Charts are mainly for proof points.
+- Short videos are mainly for demos or motion-heavy product moments.
+- Confidence must be between 0 and 1.`;
+}
+
+export function normalizeMediaPlan(value: unknown): MediaPlan {
+  if (!value || typeof value !== "object") {
+    return {
+      media_type: "none",
+      media_reason: "",
+      asset_brief: "",
+      search_query: "",
+      confidence: 0,
+    };
+  }
+
+  const plan = value as Partial<MediaPlan>;
+  const mediaType = plan.media_type;
+  return {
+    media_type:
+      mediaType === "gif" ||
+      mediaType === "screenshot" ||
+      mediaType === "image" ||
+      mediaType === "chart" ||
+      mediaType === "short_video"
+        ? mediaType
+        : "none",
+    media_reason: String(plan.media_reason || "").trim(),
+    asset_brief: String(plan.asset_brief || "").trim(),
+    search_query: String(plan.search_query || "").trim(),
+    confidence: Number.isFinite(Number(plan.confidence)) ? Math.max(0, Math.min(1, Number(plan.confidence))) : 0,
+  };
 }

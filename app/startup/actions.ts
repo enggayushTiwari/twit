@@ -55,7 +55,7 @@ type StartupReflectionTurnRow = {
     mode: 'capture_followup';
     prompt: string;
     answer: string;
-    startup_memory_entry_id: string | null;
+    build_memory_entry_id: string | null;
     metadata: Record<string, unknown> | null;
     created_at: string;
 };
@@ -111,15 +111,20 @@ function mapStartupMemoryEntry(row: StartupMemoryEntryRow): StartupMemoryEntry {
 
 function mapStartupReflectionTurn(row: StartupReflectionTurnRow): StartupReflectionTurn {
     return {
-        ...row,
+        id: row.id,
+        mode: row.mode,
+        prompt: row.prompt,
+        answer: row.answer,
+        startup_memory_entry_id: row.build_memory_entry_id,
+        created_at: row.created_at,
         metadata: normalizeStartupReflectionMetadata(row.metadata),
     };
 }
 
 async function getPendingStartupReflection() {
     const { data, error } = await supabase
-        .from('startup_reflection_turns')
-        .select('id, mode, prompt, answer, startup_memory_entry_id, metadata, created_at')
+        .from('build_reflection_turns')
+        .select('id, mode, prompt, answer, build_memory_entry_id, metadata, created_at')
         .eq('mode', 'capture_followup')
         .eq('answer', '')
         .order('created_at', { ascending: false })
@@ -135,7 +140,7 @@ async function getPendingStartupReflection() {
 
 async function getRecentSkippedStartupReflectionCount() {
     const { data } = await supabase
-        .from('startup_reflection_turns')
+        .from('build_reflection_turns')
         .select('id')
         .eq('mode', 'capture_followup')
         .eq('answer', SKIPPED_ANSWER)
@@ -151,17 +156,17 @@ async function createStartupReflectionTurn(params: {
     metadata?: StartupReflectionMetadata;
 }) {
     const { data, error } = await supabase
-        .from('startup_reflection_turns')
+        .from('build_reflection_turns')
         .insert([
             {
                 mode: 'capture_followup',
                 prompt: params.prompt,
                 answer: '',
-                startup_memory_entry_id: params.startupMemoryEntryId,
+                build_memory_entry_id: params.startupMemoryEntryId,
                 metadata: params.metadata || {},
             },
         ])
-        .select('id, mode, prompt, answer, startup_memory_entry_id, metadata, created_at')
+        .select('id, mode, prompt, answer, build_memory_entry_id, metadata, created_at')
         .single();
 
     if (error || !data) {
@@ -278,7 +283,7 @@ export async function getStartupWorkspace() {
             await Promise.all([
                 ensureStartupProfileRow(),
                 supabase
-                    .from('startup_memory_entries')
+                    .from('build_memory_entries')
                     .select('id, content, kind, metadata, created_at')
                     .order('created_at', { ascending: false })
                     .limit(24),
@@ -286,14 +291,14 @@ export async function getStartupWorkspace() {
                 supabase
                     .from('generated_tweets')
                     .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
-                    .eq('generation_mode', 'startup')
+                    .in('generation_mode', ['build', 'startup'])
                     .order('created_at', { ascending: false })
                     .limit(8),
             ]);
 
         const { data: recentAnswered } = await supabase
-            .from('startup_reflection_turns')
-            .select('id, mode, prompt, answer, startup_memory_entry_id, metadata, created_at')
+            .from('build_reflection_turns')
+            .select('id, mode, prompt, answer, build_memory_entry_id, metadata, created_at')
             .neq('answer', '')
             .neq('answer', SKIPPED_ANSWER)
             .order('created_at', { ascending: false })
@@ -312,7 +317,7 @@ export async function getStartupWorkspace() {
                     id: string;
                     content: string;
                     status: string;
-                    generation_mode: 'startup';
+                    generation_mode: 'build' | 'startup';
                     theses: string[] | null;
                     alternates: Array<{
                         draft: string;
@@ -366,6 +371,7 @@ export async function updateStartupProfile(
             return { success: false, error: 'Failed to update startup profile.' };
         }
 
+        revalidatePath('/build');
         revalidatePath('/startup');
         return { success: true };
     } catch (err: unknown) {
@@ -385,7 +391,7 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
     try {
         const trimmedContent = content.trim();
         const { data: existingEntry } = await supabase
-            .from('startup_memory_entries')
+            .from('build_memory_entries')
             .select('id')
             .eq('content', trimmedContent)
             .limit(1)
@@ -419,7 +425,7 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
         });
 
         const { data: insertedEntry, error: insertError } = await supabase
-            .from('startup_memory_entries')
+            .from('build_memory_entries')
             .insert([
                 {
                     content: trimmedContent,
@@ -458,6 +464,7 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
             });
         }
 
+        revalidatePath('/build');
         revalidatePath('/startup');
 
         return {
@@ -476,7 +483,7 @@ export async function saveStartupMemoryEntry(content: string, kind: StartupMemor
 export async function deleteStartupMemoryEntry(id: string) {
     try {
         const { data, error } = await supabase
-            .from('startup_memory_entries')
+            .from('build_memory_entries')
             .delete()
             .eq('id', id)
             .select('id');
@@ -485,6 +492,7 @@ export async function deleteStartupMemoryEntry(id: string) {
             return { success: false, error: 'Failed to delete startup memory.' };
         }
 
+        revalidatePath('/build');
         revalidatePath('/startup');
         return { success: true };
     } catch (err: unknown) {
@@ -499,8 +507,8 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
 
     try {
         const { data: reflectionRow, error: reflectionError } = await supabase
-            .from('startup_reflection_turns')
-            .select('id, mode, prompt, answer, startup_memory_entry_id, metadata, created_at')
+            .from('build_reflection_turns')
+            .select('id, mode, prompt, answer, build_memory_entry_id, metadata, created_at')
             .eq('id', id)
             .single();
 
@@ -510,7 +518,7 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
 
         const reflection = mapStartupReflectionTurn(reflectionRow as StartupReflectionTurnRow);
         const { data: memoryRow, error: memoryError } = await supabase
-            .from('startup_memory_entries')
+            .from('build_memory_entries')
             .select('id, content, kind, metadata, created_at')
             .eq('id', reflection.startup_memory_entry_id)
             .single();
@@ -539,11 +547,11 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
 
         await Promise.all([
             supabase
-                .from('startup_reflection_turns')
+                .from('build_reflection_turns')
                 .update({ answer: answer.trim() })
                 .eq('id', reflection.id),
             supabase
-                .from('startup_memory_entries')
+                .from('build_memory_entries')
                 .update({
                     metadata: {
                         ...parsedEntry.metadata,
@@ -556,6 +564,7 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
                 .eq('id', parsedEntry.id),
         ]);
 
+        revalidatePath('/build');
         revalidatePath('/startup');
 
         return {
@@ -585,7 +594,7 @@ export async function answerStartupReflectionTurn(id: string, answer: string) {
 export async function skipStartupReflectionTurn(id: string) {
     try {
         const { error } = await supabase
-            .from('startup_reflection_turns')
+            .from('build_reflection_turns')
             .update({ answer: SKIPPED_ANSWER })
             .eq('id', id);
 
@@ -593,6 +602,7 @@ export async function skipStartupReflectionTurn(id: string) {
             return { success: false, error: 'Failed to skip startup reflection.' };
         }
 
+        revalidatePath('/build');
         revalidatePath('/startup');
         return { success: true };
     } catch (err: unknown) {

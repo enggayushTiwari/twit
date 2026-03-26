@@ -42,7 +42,7 @@ test('buildStartupGenerationSystemPrompt centers startup clarity while preservin
     recentStartupTweets: 'Old startup tweet',
   });
 
-  assert.match(prompt, /generate tweets about Idea Engine/i);
+  assert.match(prompt, /generate build-in-public X posts about Idea Engine/i);
   assert.match(prompt, /Optimize for customers\/public first/i);
   assert.match(prompt, /Distribution is product architecture/i);
   assert.match(prompt, /avoid builder jargon/i);
@@ -51,6 +51,8 @@ test('buildStartupGenerationSystemPrompt centers startup clarity while preservin
 test('startup candidate prompt asks for startup communication angles', () => {
   const prompt = buildStartupCandidateGenerationPrompt({
     seedIdea: 'Users need help turning scattered founder notes into public-facing clarity.',
+    targetArchetype: 'build_update',
+    surfaceIntent: 'build_in_public',
   });
 
   assert.match(prompt, /problem clarity/i);
@@ -59,7 +61,7 @@ test('startup candidate prompt asks for startup communication angles', () => {
 });
 
 test('startup critic prompt scores for clarity and distribution usefulness', () => {
-  const prompt = buildStartupCriticPrompt('{"candidates": []}');
+  const prompt = buildStartupCriticPrompt('{"candidates": []}', 'build_update', 'build_in_public');
 
   assert.match(prompt, /customer\/public clarity/i);
   assert.match(prompt, /usefulness for distribution/i);

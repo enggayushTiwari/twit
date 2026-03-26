@@ -1,23 +1,30 @@
 import type { ReflectionFormat } from "./self-model";
 
-export const STARTUP_MEMORY_KINDS = [
+export const BUILD_MEMORY_KINDS = [
   "product_insight",
   "customer_pain",
   "positioning",
   "objection",
   "proof",
-  "feature_update",
+  "shipping_update",
   "distribution_gtm",
   "founder_belief",
   "user_language",
+  "project_log",
 ] as const;
 
-export const STARTUP_REFLECTION_MODES = ["capture_followup"] as const;
+export const STARTUP_MEMORY_KINDS = BUILD_MEMORY_KINDS;
 
-export const GENERATED_TWEET_MODES = ["general", "startup"] as const;
+export const BUILD_REFLECTION_MODES = ["capture_followup"] as const;
 
-export type StartupMemoryKind = (typeof STARTUP_MEMORY_KINDS)[number];
-export type StartupReflectionMode = (typeof STARTUP_REFLECTION_MODES)[number];
+export const STARTUP_REFLECTION_MODES = BUILD_REFLECTION_MODES;
+
+export const GENERATED_TWEET_MODES = ["general", "build", "startup"] as const;
+
+export type BuildMemoryKind = (typeof BUILD_MEMORY_KINDS)[number];
+export type StartupMemoryKind = BuildMemoryKind;
+export type BuildReflectionMode = (typeof BUILD_REFLECTION_MODES)[number];
+export type StartupReflectionMode = BuildReflectionMode;
 export type GeneratedTweetMode = (typeof GENERATED_TWEET_MODES)[number];
 
 export type StartupProfile = {
@@ -123,14 +130,16 @@ export function getStartupMemoryKindLabel(kind: StartupMemoryKind) {
       return "Objection";
     case "proof":
       return "Proof";
-    case "feature_update":
-      return "Feature update";
+    case "shipping_update":
+      return "Shipping update";
     case "distribution_gtm":
       return "Distribution / GTM";
     case "founder_belief":
       return "Founder belief";
     case "user_language":
       return "User language";
+    case "project_log":
+      return "Project log";
     default:
       return kind;
   }

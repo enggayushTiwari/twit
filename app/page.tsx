@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
   answerReflectionTurn,
   createEventReflection,
@@ -196,7 +195,7 @@ export default function Home() {
       ? ` Classified as ${result.extraction.signalType.replace('_', ' ')}.`
       : '';
     setStatus('success');
-    setMessage(`Saved to vault.${signalType}`);
+    setMessage(activeTab === 'project_log' ? `Saved to build memory.${signalType}` : `Saved to vault.${signalType}`);
     setIdea('');
     pushLearnedEntries(result.extraction?.suggestedEntries);
 
@@ -658,6 +657,9 @@ export default function Home() {
                       <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                         {DISCOVERY_TOPICS.find((item) => item.id === topic.topic)?.label || topic.topic}
                       </span>
+                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                        {topic.recommendedArchetype.replace(/_/g, ' ')}
+                      </span>
                       <span>{topic.sourceLabel}</span>
                       {topic.freshnessLabel ? <span>{topic.freshnessLabel}</span> : null}
                     </div>
@@ -666,6 +668,9 @@ export default function Home() {
                     </p>
                     <p className="mt-2 text-sm leading-relaxed text-zinc-400">{topic.summary}</p>
                     <p className="mt-3 text-xs leading-relaxed text-amber-300">{topic.promptHint}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                      Postability {Math.round(topic.postabilityScore * 100)}% · build relevance {Math.round(topic.buildRelevanceScore * 100)}%
+                    </p>
 
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button

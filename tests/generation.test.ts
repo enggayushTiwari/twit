@@ -16,6 +16,9 @@ test('buildGenerationSystemPrompt includes profile and creator voice inputs', ()
     sourceType: 'idea',
     contextIdeas: 'Distribution is a systems design problem.',
     pastTweets: 'Old tweet one',
+    confirmedEntries: [],
+    currentObsessions: [],
+    recentEventPovs: [],
   });
 
   assert.match(prompt, /Calm technical operator/);
@@ -32,6 +35,9 @@ test('buildGenerationSystemPrompt falls back cleanly without creator voice', () 
     sourceType: 'project_log',
     contextIdeas: 'Debugged a flaky queue worker.',
     pastTweets: 'None',
+    confirmedEntries: [],
+    currentObsessions: [],
+    recentEventPovs: [],
   });
 
   assert.match(prompt, /REFERENCE VOICE: None selected/);

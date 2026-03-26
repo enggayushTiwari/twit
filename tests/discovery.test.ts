@@ -76,6 +76,10 @@ test('dedupeLiveTopics removes duplicate titles within the same source kind, cou
       country: 'worldwide',
       topic: 'general',
       sourceType: 'news',
+      recommendedArchetype: 'hard_statement',
+      worldviewFitScore: 0.6,
+      buildRelevanceScore: 0.4,
+      postabilityScore: 0.7,
     },
     {
       id: 'two',
@@ -90,6 +94,10 @@ test('dedupeLiveTopics removes duplicate titles within the same source kind, cou
       country: 'worldwide',
       topic: 'general',
       sourceType: 'news',
+      recommendedArchetype: 'hard_statement',
+      worldviewFitScore: 0.6,
+      buildRelevanceScore: 0.4,
+      postabilityScore: 0.7,
     },
   ]);
 

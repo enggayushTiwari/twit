@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import Link from 'next/link';
 import { deleteGeneratedTweet } from '../actions';
 import {
   answerStartupReflectionTurn,
@@ -27,7 +26,7 @@ type StartupDraftRecord = {
   id: string;
   content: string;
   status: string;
-  generation_mode: 'startup';
+  generation_mode: 'build' | 'startup';
   theses: string[] | null;
   alternates:
     | Array<{
@@ -61,7 +60,7 @@ function toReflectionCardInput(reflection: StartupReflectionTurn): ReflectionTur
     mode: 'capture_followup',
     prompt: reflection.prompt,
     answer: reflection.answer,
-    context_ref_type: 'startup_memory',
+    context_ref_type: 'build_memory',
     context_ref_id: reflection.startup_memory_entry_id,
     derived_entry_ids: [],
     metadata: {
@@ -222,7 +221,7 @@ export default function StartupWorkspacePage() {
     }
 
     await refreshWorkspace();
-    setToast('Startup profile updated.');
+    setToast('Build profile updated.');
     window.setTimeout(() => setToast(null), 2500);
   }
 
@@ -237,7 +236,7 @@ export default function StartupWorkspacePage() {
     setSavingMemory(false);
 
     if (!result.success || !result.data) {
-      setError(getActionError(result, 'Failed to save startup memory.'));
+      setError(getActionError(result, 'Failed to save build memory.'));
       return;
     }
 
@@ -246,7 +245,7 @@ export default function StartupWorkspacePage() {
     setPendingReflection((previous) => result.data?.reflection || previous);
     setLatestFocus(result.data.suggestion.communication_focus);
     setLatestSuggestedPoints(result.data.suggestion.suggested_points);
-    setToast('Startup memory saved.');
+    setToast('Build memory saved.');
     window.setTimeout(() => setToast(null), 2500);
   }
 
@@ -285,7 +284,7 @@ export default function StartupWorkspacePage() {
     setError(null);
 
     try {
-      const response = await fetch('/api/startup/generate', {
+      const response = await fetch('/api/build/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -293,17 +292,17 @@ export default function StartupWorkspacePage() {
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to generate a startup draft.');
+        throw new Error(data.error || 'Failed to generate a build draft.');
       }
 
       await refreshWorkspace();
-      setToast('Generated a startup-specific draft.');
+      setToast('Generated a build-in-public draft.');
       window.setTimeout(() => setToast(null), 2500);
     } catch (generationError) {
       const message =
         generationError instanceof Error
           ? generationError.message
-          : 'Failed to generate a startup draft.';
+          : 'Failed to generate a build draft.';
       setError(message);
     } finally {
       setGenerating(false);
@@ -318,7 +317,7 @@ export default function StartupWorkspacePage() {
     const result = await deleteStartupMemoryEntry(entryId);
     if (!result.success) {
       setMemoryEntries(previousEntries);
-      setError(getActionError(result, 'Failed to delete startup memory.'));
+      setError(getActionError(result, 'Failed to delete build memory.'));
       return;
     }
 
@@ -326,7 +325,7 @@ export default function StartupWorkspacePage() {
       setPendingReflection(null);
     }
 
-    setToast('Startup memory deleted.');
+    setToast('Build memory deleted.');
     window.setTimeout(() => setToast(null), 2500);
   }
 
@@ -338,11 +337,11 @@ export default function StartupWorkspacePage() {
     const result = await deleteGeneratedTweet(tweetId);
     if (!result.success) {
       setRecentDrafts(previousDrafts);
-      setError(getActionError(result, 'Failed to delete startup draft.'));
+      setError(getActionError(result, 'Failed to delete build draft.'));
       return;
     }
 
-    setToast('Startup draft deleted.');
+    setToast('Build draft deleted.');
     window.setTimeout(() => setToast(null), 2500);
   }
 
@@ -360,12 +359,12 @@ export default function StartupWorkspacePage() {
         <header className="border-b border-zinc-900 pb-8">
           <div>
             <h1 className="text-2xl font-medium tracking-tight text-zinc-100">
-              Startup Workspace
+              Build in Public Workspace
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-zinc-500 sm:max-w-3xl">
-              This is a separate memory lane for the startup you are actively building. It learns
-              how to explain the product to broader people, then generates startup-specific tweets
-              without mixing in the general vault.
+              This is the shared build memory for what you are actively building. It combines
+              startup thinking and project logs so the system can generate build-in-public posts
+              without losing the product story.
             </p>
           </div>
         </header>
@@ -373,8 +372,8 @@ export default function StartupWorkspacePage() {
         {pendingReflection ? (
           <ReflectionPromptCard
             reflection={toReflectionCardInput(pendingReflection)}
-            title="Startup Follow-Up"
-            description="This question is trying to make the startup clearer to outsiders, not just to you as the builder."
+            title="Build Follow-Up"
+            description="This question is trying to make the build story clearer to outsiders, not just to you as the builder."
             submitLabel="Save Clarification"
             onSubmit={handleStartupReflectionAnswer}
             onSkip={handleStartupReflectionSkip}
@@ -401,11 +400,11 @@ export default function StartupWorkspacePage() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                  Startup Profile
+                  Build Profile
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-                  Give the generator the minimum product context it needs before it starts trying to
-                  communicate the startup in public.
+                  Give the generator the minimum product context it needs before it starts turning
+                  your build process into public-facing posts.
                 </p>
               </div>
               <button
@@ -423,14 +422,14 @@ export default function StartupWorkspacePage() {
                 name="startup_name"
                 value={profileForm.startup_name}
                 onChange={(event) => handleProfileFieldChange('startup_name', event)}
-                placeholder="Startup name"
+                placeholder="Product or startup name"
                 className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
                 name="one_liner"
                 value={profileForm.one_liner}
                 onChange={(event) => handleProfileFieldChange('one_liner', event)}
-                placeholder="One-liner: what is this startup in plain language?"
+                placeholder="One-liner: what are you building in plain language?"
                 className="min-h-[88px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
               />
               <textarea
@@ -490,11 +489,11 @@ export default function StartupWorkspacePage() {
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    Startup Memory
+                    Build Memory
                   </p>
                   <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-                    Save product insights, pains, objections, proof, user language, and GTM thoughts
-                    into a dedicated startup memory.
+                    Save product insights, project logs, pains, objections, proof, user language,
+                    and GTM thoughts into one build memory lane.
                   </p>
                 </div>
                 <button
@@ -504,7 +503,7 @@ export default function StartupWorkspacePage() {
                   className="inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-2.5 text-sm font-semibold text-violet-300 transition-colors hover:bg-violet-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  {generating ? 'Generating...' : 'Generate Startup Draft'}
+                  {generating ? 'Generating...' : 'Generate Build Draft'}
                 </button>
               </div>
 
@@ -524,7 +523,7 @@ export default function StartupWorkspacePage() {
                 <textarea
                   value={memoryInput}
                   onChange={(event) => setMemoryInput(event.target.value)}
-                  placeholder="Capture a startup-specific thought. Example: users don’t need more dashboards, they need one place that turns scattered product signals into a clear next action."
+                  placeholder="Capture something from the build: a project log, product insight, shipping note, objection, or customer pattern."
                   className="min-h-[160px] resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
                   spellCheck={false}
                 />
@@ -537,7 +536,7 @@ export default function StartupWorkspacePage() {
                 className="mt-4 inline-flex items-center gap-2 rounded-full bg-zinc-100 px-5 py-2.5 text-sm font-semibold text-zinc-950 transition-all hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {savingMemory ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-                {savingMemory ? 'Saving...' : 'Save Startup Memory'}
+                {savingMemory ? 'Saving...' : 'Save Build Memory'}
               </button>
 
               {latestFocus || latestSuggestedPoints.length > 0 ? (
@@ -566,12 +565,12 @@ export default function StartupWorkspacePage() {
 
             <section className="rounded-2xl border border-zinc-900 bg-zinc-950/70 p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Recent Startup Drafts
+                Recent Build Drafts
               </p>
               <div className="mt-4 grid gap-3">
                 {recentDrafts.length === 0 ? (
                   <div className="rounded-xl border border-zinc-900 border-dashed px-4 py-6 text-sm text-zinc-600">
-                    No startup drafts yet. Generate one after you save a few startup memories.
+                    No build drafts yet. Generate one after you save a few build memories.
                   </div>
                 ) : (
                   recentDrafts.slice(0, 4).map((draft) => (
@@ -592,7 +591,7 @@ export default function StartupWorkspacePage() {
                           type="button"
                           onClick={() => void handleDeleteStartupDraft(draft.id)}
                           className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
-                          title="Delete startup draft"
+                          title="Delete build draft"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -609,13 +608,13 @@ export default function StartupWorkspacePage() {
         <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-2xl border border-zinc-900 bg-zinc-950/70 p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              Startup Memory Log
+              Build Memory Log
             </p>
             <div className="mt-4 grid gap-3">
               {memoryEntries.length === 0 ? (
                 <div className="rounded-xl border border-zinc-900 border-dashed px-4 py-6 text-sm text-zinc-600">
-                  Save product insights, objections, and customer pain here to start the startup
-                  communication loop.
+                  Save project logs, product insights, objections, and customer pain here to start
+                  the build-in-public loop.
                 </div>
               ) : (
                 memoryEntries.map((entry) => (
@@ -633,7 +632,7 @@ export default function StartupWorkspacePage() {
                         type="button"
                         onClick={() => void handleDeleteStartupMemory(entry.id)}
                         className="rounded-lg border border-zinc-800 p-2 text-zinc-500 transition-colors hover:border-red-500/40 hover:text-red-400"
-                        title="Delete startup memory"
+                        title="Delete build memory"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -663,16 +662,16 @@ export default function StartupWorkspacePage() {
             </p>
             <div className="mt-4 grid gap-3 text-sm leading-relaxed text-zinc-400">
               <p>
-                It keeps startup memory separate from the general vault, so the startup generator
-                only reasons over product-specific material.
+                It keeps build memory separate from the general vault, so the build generator only
+                reasons over what you are actually building.
               </p>
               <p>
-                It still uses your shared mind model as the worldview and taste filter, so startup
-                tweets sound like you without dragging in unrelated general ideas.
+                It still uses your shared mind model as the worldview and taste filter, so build
+                posts sound like you without dragging in unrelated general ideas.
               </p>
               <p>
-                The follow-up questions are trying to make the startup more legible to broader
-                people: who it is for, what painful problem it solves, what changes after using it,
+                The follow-up questions are trying to make the build more legible to broader
+                people: what shipped, who it is for, what painful problem it solves, what changed,
                 and what objection a skeptic would raise.
               </p>
             </div>

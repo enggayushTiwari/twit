@@ -39,11 +39,49 @@ export const EVENT_REFLECTION_STATUSES = [
   "archived",
 ] as const;
 
+export const POST_ARCHETYPES = [
+  "question",
+  "hard_statement",
+  "counterintuitive_take",
+  "build_update",
+  "customer_insight",
+  "proof_point",
+  "objection_handling",
+  "founder_belief",
+  "trend_reaction",
+  "light_humor",
+  "thread_seed",
+] as const;
+
+export const SURFACE_INTENTS = [
+  "feed_post",
+  "conversation_starter",
+  "build_in_public",
+  "news_reaction",
+  "media_supported",
+  "thread_opener",
+] as const;
+
+export const MEDIA_TYPES = [
+  "none",
+  "gif",
+  "screenshot",
+  "image",
+  "chart",
+  "short_video",
+] as const;
+
+export const SOURCE_MEMORY_SCOPES = ["general", "build", "mixed"] as const;
+
 export type MindModelKind = (typeof MIND_MODEL_KINDS)[number];
 export type MindModelStatus = (typeof MIND_MODEL_STATUSES)[number];
 export type ReflectionMode = (typeof REFLECTION_MODES)[number];
 export type FeedbackTag = (typeof FEEDBACK_TAG_OPTIONS)[number];
 export type EventReflectionStatus = (typeof EVENT_REFLECTION_STATUSES)[number];
+export type PostArchetype = (typeof POST_ARCHETYPES)[number];
+export type SurfaceIntent = (typeof SURFACE_INTENTS)[number];
+export type MediaType = (typeof MEDIA_TYPES)[number];
+export type SourceMemoryScope = (typeof SOURCE_MEMORY_SCOPES)[number];
 export type ReflectionFormat = "open" | "pairwise";
 
 export type MindModelEntry = {
@@ -110,15 +148,27 @@ export type TweetAlternate = {
   score?: number;
 };
 
+export type MediaPlan = {
+  media_type: MediaType;
+  media_reason: string;
+  asset_brief: string;
+  search_query: string;
+  confidence: number;
+};
+
 export type GeneratedTweetRecord = {
   id: string;
   content: string;
   status: string;
   created_at: string;
-  generation_mode?: "general" | "startup";
+  generation_mode?: "general" | "build" | "startup";
   theses?: string[] | null;
   alternates?: TweetAlternate[] | null;
   rationale?: string | null;
+  post_archetype?: PostArchetype | null;
+  surface_intent?: SurfaceIntent | null;
+  media_plan?: MediaPlan | null;
+  source_memory_scope?: SourceMemoryScope | null;
 };
 
 export type SuggestedMindModelEntry = {

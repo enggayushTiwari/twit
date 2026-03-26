@@ -7,7 +7,7 @@ import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, GENERATION_MODEL } from '../util
 import { parseJsonResponse } from '../utils/ai-json';
 import { getErrorMessage } from '../utils/errors';
 import { scrapeUrl } from '../utils/scraper';
-import type { GeneratedTweetMode } from '../utils/startup';
+import type { BuildMemoryKind, GeneratedTweetMode } from '../utils/startup';
 import {
     buildFeedbackSuggestion,
     calculateEditIntensity,
@@ -21,12 +21,16 @@ import {
     type DraftFeedbackRecord,
     type EventReflection,
     type FeedbackTag,
+    type MediaPlan,
     type MindModelEntry,
     type MindModelKind,
     type MindModelStatus,
+    type PostArchetype,
     type ReflectionMetadata,
     type ReflectionMode,
     type ReflectionTurn,
+    type SourceMemoryScope,
+    type SurfaceIntent,
     type SuggestedMindModelEntry,
 } from '../utils/self-model';
 
@@ -84,6 +88,10 @@ type GeneratedTweetRow = {
         | null;
     rationale: string | null;
     created_at: string;
+    post_archetype?: PostArchetype | null;
+    surface_intent?: SurfaceIntent | null;
+    media_plan?: MediaPlan | null;
+    source_memory_scope?: SourceMemoryScope | null;
 };
 
 type DraftDecisionInput = {
@@ -99,6 +107,16 @@ type EventCaptureInput = {
     headline?: string;
     sourceUrl?: string;
     sourceText?: string;
+};
+
+type ProjectLogBuildCapture = {
+    build_kind: BuildMemoryKind;
+    communication_focus: string;
+    suggested_points: string[];
+    should_ask_follow_up: boolean;
+    follow_up_question: string;
+    generalizable_takeaway: string;
+    takeaway_confidence: number;
 };
 
 async function ensureUserProfileRow() {
@@ -147,6 +165,61 @@ function clampPriority(value: number) {
     }
 
     return Math.max(1, Math.min(3, Math.round(value)));
+}
+
+async function deriveProjectLogBuildCapture(content: string) {
+    const completionResponse = await ai.models.generateContent({
+        model: GENERATION_MODEL,
+        contents: `Project log:\n${content}`,
+        config: {
+            temperature: 0.3,
+            systemInstruction: `You are translating a founder's project log into build-in-public memory.
+Return JSON only:
+{
+  "build_kind": "project_log",
+  "communication_focus": "...",
+  "suggested_points": ["...", "..."],
+  "should_ask_follow_up": true,
+  "follow_up_question": "...",
+  "generalizable_takeaway": "...",
+  "takeaway_confidence": 0.0
+}
+
+Rules:
+- build_kind must be one of: product_insight, customer_pain, positioning, objection, proof, shipping_update, distribution_gtm, founder_belief, user_language, project_log.
+- generalizable_takeaway should be a broader lesson only if the project log contains one.
+- takeaway_confidence must be between 0 and 1.
+- Ask a follow-up only if one question would materially improve build-in-public clarity.`,
+        },
+    });
+
+    const parsed = parseJsonResponse<Partial<ProjectLogBuildCapture>>(
+        completionResponse.text || '',
+        'Failed to parse project-log build capture'
+    );
+
+    const buildKind = parsed.build_kind;
+    return {
+        build_kind:
+            buildKind === 'product_insight' ||
+            buildKind === 'customer_pain' ||
+            buildKind === 'positioning' ||
+            buildKind === 'objection' ||
+            buildKind === 'proof' ||
+            buildKind === 'shipping_update' ||
+            buildKind === 'distribution_gtm' ||
+            buildKind === 'founder_belief' ||
+            buildKind === 'user_language' ||
+            buildKind === 'project_log'
+                ? buildKind
+                : 'project_log',
+        communication_focus: String(parsed.communication_focus || '').trim(),
+        suggested_points: normalizeStringArray(parsed.suggested_points).slice(0, 5),
+        should_ask_follow_up: Boolean(parsed.should_ask_follow_up),
+        follow_up_question: String(parsed.follow_up_question || '').trim(),
+        generalizable_takeaway: String(parsed.generalizable_takeaway || '').trim(),
+        takeaway_confidence: Math.max(0, Math.min(1, Number(parsed.takeaway_confidence || 0))),
+    } satisfies ProjectLogBuildCapture;
 }
 
 function isMindModelKind(value: string): value is MindModelKind {
@@ -624,8 +697,9 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
     const ideaText = content.trim();
 
     try {
+        const duplicateTable = type === 'project_log' ? 'build_memory_entries' : 'raw_ideas';
         const { data: existingIdea, error: checkError } = await supabase
-            .from('raw_ideas')
+            .from(duplicateTable)
             .select('id')
             .eq('content', ideaText)
             .limit(1)
@@ -650,14 +724,88 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
             return { success: false, error: `Failed to generate correct embedding dimensions. Got ${embedding?.length}, expected ${EMBEDDING_DIMENSIONS}` };
         }
 
-        const { data: insertedIdea, error: insertError } = await supabase
-            .from('raw_ideas')
-            .insert([{ content: ideaText, embedding, type }])
-            .select('id, content, type, created_at')
-            .single();
+        let savedId = '';
+        let reflectionContextType = 'raw_idea';
+        let reflectionContextId = '';
 
-        if (insertError || !insertedIdea) {
-            return { success: false, error: 'Failed to insert idea into database.' };
+        if (type === 'project_log') {
+            const buildCapture = await deriveProjectLogBuildCapture(ideaText);
+
+            const { data: insertedBuildEntry, error: buildInsertError } = await supabase
+                .from('build_memory_entries')
+                .insert([
+                    {
+                        content: ideaText,
+                        kind: buildCapture.build_kind,
+                        embedding,
+                        metadata: {
+                            communication_focus: buildCapture.communication_focus,
+                            suggested_points: buildCapture.suggested_points,
+                            generalizable_takeaway: buildCapture.generalizable_takeaway,
+                            takeaway_confidence: buildCapture.takeaway_confidence,
+                            original_capture_type: 'project_log',
+                        },
+                    },
+                ])
+                .select('id')
+                .single();
+
+            if (buildInsertError || !insertedBuildEntry) {
+                return { success: false, error: 'Failed to insert project log into build memory.' };
+            }
+
+            savedId = insertedBuildEntry.id;
+            reflectionContextType = 'build_memory';
+            reflectionContextId = insertedBuildEntry.id;
+
+            if (
+                buildCapture.generalizable_takeaway &&
+                buildCapture.takeaway_confidence >= 0.72
+            ) {
+                const { data: existingTakeaway } = await supabase
+                    .from('raw_ideas')
+                    .select('id')
+                    .eq('content', buildCapture.generalizable_takeaway)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (!existingTakeaway) {
+                    const takeawayEmbeddingResponse = await aiBeta.models.embedContent({
+                        model: EMBEDDING_MODEL,
+                        contents: buildCapture.generalizable_takeaway,
+                    });
+
+                    const takeawayEmbedding = takeawayEmbeddingResponse.embeddings?.[0]?.values;
+                    if (takeawayEmbedding && takeawayEmbedding.length === EMBEDDING_DIMENSIONS) {
+                        await supabase.from('raw_ideas').insert([
+                            {
+                                content: buildCapture.generalizable_takeaway,
+                                embedding: takeawayEmbedding,
+                                type: 'build_takeaway',
+                                metadata: {
+                                    source: 'build_memory',
+                                    build_memory_entry_id: insertedBuildEntry.id,
+                                    original_capture_type: 'project_log',
+                                    takeaway_confidence: buildCapture.takeaway_confidence,
+                                },
+                            },
+                        ]);
+                    }
+                }
+            }
+        } else {
+            const { data: insertedIdea, error: insertError } = await supabase
+                .from('raw_ideas')
+                .insert([{ content: ideaText, embedding, type }])
+                .select('id, content, type, created_at')
+                .single();
+
+            if (insertError || !insertedIdea) {
+                return { success: false, error: 'Failed to insert idea into database.' };
+            }
+
+            savedId = insertedIdea.id;
+            reflectionContextId = insertedIdea.id;
         }
 
         let suggestedEntries: MindModelEntry[] = [];
@@ -670,16 +818,16 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
             signalType = extraction.signal_type;
             suggestedEntries = await upsertSuggestedEntries({
                 entries: extraction.candidate_entries,
-                sourceType: 'raw_idea',
-                sourceRefId: insertedIdea.id,
+                sourceType: type === 'project_log' ? 'build_memory' : 'raw_idea',
+                sourceRefId: savedId,
             });
 
             if (extraction.should_ask_follow_up && extraction.follow_up_question && skippedCount < 2) {
                 reflection = await createReflectionTurn({
                     mode: 'capture_followup',
                     prompt: extraction.follow_up_question,
-                    contextRefType: 'raw_idea',
-                    contextRefId: insertedIdea.id,
+                    contextRefType: reflectionContextType,
+                    contextRefId: reflectionContextId,
                     derivedEntryIds: suggestedEntries.map((entry) => entry.id),
                     metadata: {
                         format: 'open',
@@ -693,11 +841,13 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
 
         revalidatePath('/');
         revalidatePath('/vault');
+        revalidatePath('/build');
+        revalidatePath('/startup');
         revalidatePath('/profile');
 
         return {
             success: true,
-            savedId: insertedIdea.id,
+            savedId,
             extraction: {
                 signalType,
                 suggestedEntries,
@@ -714,11 +864,13 @@ export async function getPendingTweets(mode: GeneratedTweetMode = 'general') {
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
+            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .eq('status', 'PENDING')
             .order('created_at', { ascending: false });
 
-        if (mode) {
+        if (mode === 'build') {
+            query = query.in('generation_mode', ['build', 'startup']);
+        } else if (mode) {
             query = query.eq('generation_mode', mode);
         }
 
@@ -776,6 +928,7 @@ export async function deleteGeneratedTweet(id: string) {
         }
 
         revalidatePath('/review');
+        revalidatePath('/build');
         revalidatePath('/startup');
         return { success: true };
     } catch (err: unknown) {
@@ -858,11 +1011,13 @@ export async function getTweetHistory(mode: GeneratedTweetMode | 'all' = 'all') 
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at')
+            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .neq('status', 'PENDING')
             .order('created_at', { ascending: false });
 
-        if (mode !== 'all') {
+        if (mode === 'build') {
+            query = query.in('generation_mode', ['build', 'startup']);
+        } else if (mode !== 'all') {
             query = query.eq('generation_mode', mode);
         }
 
@@ -1226,17 +1381,33 @@ export async function answerReflectionTurn(id: string, answer: string) {
         let event: EventReflection | null = null;
 
         if (reflection.mode === 'capture_followup') {
-            const { data: rawIdea } = await supabase
-                .from('raw_ideas')
-                .select('content, type')
-                .eq('id', reflection.context_ref_id)
-                .maybeSingle();
+            let contextSummary = 'Raw idea context unavailable.';
+
+            if (reflection.context_ref_type === 'build_memory') {
+                const { data: buildMemory } = await supabase
+                    .from('build_memory_entries')
+                    .select('content, kind')
+                    .eq('id', reflection.context_ref_id)
+                    .maybeSingle();
+
+                contextSummary = buildMemory
+                    ? `[${buildMemory.kind}] ${buildMemory.content}`
+                    : 'Build memory context unavailable.';
+            } else {
+                const { data: rawIdea } = await supabase
+                    .from('raw_ideas')
+                    .select('content, type')
+                    .eq('id', reflection.context_ref_id)
+                    .maybeSingle();
+
+                contextSummary = rawIdea ? `[${rawIdea.type}] ${rawIdea.content}` : 'Raw idea context unavailable.';
+            }
 
             const entries = await deriveEntriesFromReflection({
                 mode: reflection.mode,
                 prompt: reflection.prompt,
                 answer,
-                contextSummary: rawIdea ? `[${rawIdea.type}] ${rawIdea.content}` : 'Raw idea context unavailable.',
+                contextSummary,
             });
 
             addedEntries = await upsertSuggestedEntries({
@@ -1368,6 +1539,8 @@ export async function answerReflectionTurn(id: string, answer: string) {
             .eq('id', reflection.id);
 
         revalidatePath('/');
+        revalidatePath('/build');
+        revalidatePath('/startup');
         revalidatePath('/review');
         revalidatePath('/profile');
 
@@ -1389,6 +1562,8 @@ export async function skipReflectionTurn(id: string) {
         }
 
         revalidatePath('/');
+        revalidatePath('/build');
+        revalidatePath('/startup');
         revalidatePath('/review');
         revalidatePath('/profile');
         return { success: true };

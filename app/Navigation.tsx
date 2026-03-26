@@ -11,7 +11,7 @@ export default function Navigation() {
     { href: '/', label: 'Capture', icon: PenLine },
     { href: '/vault', label: 'Vault', icon: Database },
     { href: '/profile', label: 'Mind Model', icon: BrainCircuit },
-    { href: '/startup', label: 'Startup', icon: Rocket },
+    { href: '/build', label: 'Build', icon: Rocket },
     { href: '/review', label: 'Review', icon: LayoutList },
   ];
 
@@ -27,7 +27,7 @@ export default function Navigation() {
             Idea Engine
           </div>
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = pathname === item.href || (item.href === '/build' && pathname === '/startup');
             const Icon = item.icon;
             return (
               <Link 
@@ -51,7 +51,7 @@ export default function Navigation() {
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 border-t border-zinc-900 bg-zinc-950/95 backdrop-blur-md z-50">
         <div className="flex justify-around items-center h-[72px] px-2 pb-safe">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = pathname === item.href || (item.href === '/build' && pathname === '/startup');
             const Icon = item.icon;
             return (
               <Link 

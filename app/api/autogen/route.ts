@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { generateGeneralTweetDraft, generateStartupTweetDraft } from '@/utils/generation-runner';
+import { generateBuildTweetDraft, generateGeneralTweetDraft } from '@/utils/generation-runner';
 import { AUTO_GENERATION_INTERVAL_MINUTES, isAutoGenerationDue } from '@/utils/auto-generation';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,7 @@ export async function POST() {
   const supabase = createSupabaseClient();
   const now = new Date();
 
-  const [latestGeneralRow, latestStartupRow] = await Promise.all([
+  const [latestGeneralRow, latestBuildRow] = await Promise.all([
     supabase
       .from('generated_tweets')
       .select('created_at')
@@ -35,14 +35,14 @@ export async function POST() {
     supabase
       .from('generated_tweets')
       .select('created_at')
-      .eq('generation_mode', 'startup')
+      .in('generation_mode', ['build', 'startup'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
   ]);
 
   const results: Array<{
-    mode: 'general' | 'startup';
+    mode: 'general' | 'build';
     status: 'generated' | 'skipped';
     reason?: string;
     tweetId?: string;
@@ -63,18 +63,18 @@ export async function POST() {
     });
   }
 
-  if (isAutoGenerationDue((latestStartupRow.data as GeneratedTweetTimestampRow | null)?.created_at, now)) {
-    const result = await generateStartupTweetDraft();
+  if (isAutoGenerationDue((latestBuildRow.data as GeneratedTweetTimestampRow | null)?.created_at, now)) {
+    const result = await generateBuildTweetDraft();
     results.push(
       result.success
-        ? { mode: 'startup', status: 'generated', tweetId: result.tweet.id }
-        : { mode: 'startup', status: 'skipped', reason: result.error }
+        ? { mode: 'build', status: 'generated', tweetId: result.tweet.id }
+        : { mode: 'build', status: 'skipped', reason: result.error }
     );
   } else {
     results.push({
-      mode: 'startup',
+      mode: 'build',
       status: 'skipped',
-      reason: `Latest startup draft is newer than ${AUTO_GENERATION_INTERVAL_MINUTES} minutes.`,
+      reason: `Latest build draft is newer than ${AUTO_GENERATION_INTERVAL_MINUTES} minutes.`,
     });
   }
 

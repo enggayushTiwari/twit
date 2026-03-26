@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
   theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   rationale text NOT NULL DEFAULT '',
+  post_archetype text,
+  surface_intent text,
+  media_plan jsonb NOT NULL DEFAULT '{}'::jsonb,
+  source_memory_scope text,
   created_at timestamp with time zone DEFAULT now()
 );
 
@@ -34,7 +38,11 @@ ALTER TABLE generated_tweets
   ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general',
   ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
-  ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '';
+  ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS post_archetype text,
+  ADD COLUMN IF NOT EXISTS surface_intent text,
+  ADD COLUMN IF NOT EXISTS media_plan jsonb NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS source_memory_scope text;
 
 DO $$
 BEGIN
@@ -49,16 +57,71 @@ BEGIN
   END IF;
 END $$;
 
+ALTER TABLE generated_tweets
+  DROP CONSTRAINT IF EXISTS generated_tweets_generation_mode_check;
+
+ALTER TABLE generated_tweets
+  ADD CONSTRAINT generated_tweets_generation_mode_check
+  CHECK (generation_mode IN ('general', 'build', 'startup'));
+
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
-    WHERE conname = 'generated_tweets_generation_mode_check'
+    WHERE conname = 'generated_tweets_post_archetype_check'
   ) THEN
     ALTER TABLE generated_tweets
-      ADD CONSTRAINT generated_tweets_generation_mode_check
-      CHECK (generation_mode IN ('general', 'startup'));
+      ADD CONSTRAINT generated_tweets_post_archetype_check
+      CHECK (
+        post_archetype IS NULL OR
+        post_archetype IN (
+          'question',
+          'hard_statement',
+          'counterintuitive_take',
+          'build_update',
+          'customer_insight',
+          'proof_point',
+          'objection_handling',
+          'founder_belief',
+          'trend_reaction',
+          'light_humor',
+          'thread_seed'
+        )
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'generated_tweets_surface_intent_check'
+  ) THEN
+    ALTER TABLE generated_tweets
+      ADD CONSTRAINT generated_tweets_surface_intent_check
+      CHECK (
+        surface_intent IS NULL OR
+        surface_intent IN (
+          'feed_post',
+          'conversation_starter',
+          'build_in_public',
+          'news_reaction',
+          'media_supported',
+          'thread_opener'
+        )
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'generated_tweets_source_memory_scope_check'
+  ) THEN
+    ALTER TABLE generated_tweets
+      ADD CONSTRAINT generated_tweets_source_memory_scope_check
+      CHECK (
+        source_memory_scope IS NULL OR
+        source_memory_scope IN ('general', 'build', 'mixed')
+      );
   END IF;
 END $$;
 
@@ -142,6 +205,39 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS build_memory_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  content text NOT NULL,
+  kind text NOT NULL DEFAULT 'project_log',
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  embedding vector(3072),
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'build_memory_entries_kind_check'
+  ) THEN
+    ALTER TABLE build_memory_entries
+      ADD CONSTRAINT build_memory_entries_kind_check
+      CHECK (kind IN (
+        'product_insight',
+        'customer_pain',
+        'positioning',
+        'objection',
+        'proof',
+        'shipping_update',
+        'distribution_gtm',
+        'founder_belief',
+        'user_language',
+        'project_log'
+      ));
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS startup_reflection_turns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   mode text NOT NULL DEFAULT 'capture_followup',
@@ -161,6 +257,29 @@ BEGIN
   ) THEN
     ALTER TABLE startup_reflection_turns
       ADD CONSTRAINT startup_reflection_turns_mode_check
+      CHECK (mode IN ('capture_followup'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS build_reflection_turns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mode text NOT NULL DEFAULT 'capture_followup',
+  prompt text NOT NULL,
+  answer text NOT NULL DEFAULT '',
+  build_memory_entry_id uuid REFERENCES build_memory_entries(id) ON DELETE CASCADE,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'build_reflection_turns_mode_check'
+  ) THEN
+    ALTER TABLE build_reflection_turns
+      ADD CONSTRAINT build_reflection_turns_mode_check
       CHECK (mode IN ('capture_followup'));
   END IF;
 END $$;
@@ -287,6 +406,8 @@ ALTER TABLE creator_personas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE startup_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE startup_memory_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE startup_reflection_turns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE build_memory_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE build_reflection_turns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mind_model_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reflection_turns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE draft_feedback ENABLE ROW LEVEL SECURITY;
@@ -324,6 +445,12 @@ CREATE POLICY "Allow all access to startup_memory_entries" ON startup_memory_ent
 
 DROP POLICY IF EXISTS "Allow all access to startup_reflection_turns" ON startup_reflection_turns;
 CREATE POLICY "Allow all access to startup_reflection_turns" ON startup_reflection_turns FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to build_memory_entries" ON build_memory_entries;
+CREATE POLICY "Allow all access to build_memory_entries" ON build_memory_entries FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to build_reflection_turns" ON build_reflection_turns;
+CREATE POLICY "Allow all access to build_reflection_turns" ON build_reflection_turns FOR ALL TO public USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow all access to mind_model_entries" ON mind_model_entries;
 CREATE POLICY "Allow all access to mind_model_entries" ON mind_model_entries FOR ALL TO public USING (true) WITH CHECK (true);
@@ -397,6 +524,36 @@ GRANT EXECUTE ON FUNCTION match_startup_memory TO anon;
 GRANT EXECUTE ON FUNCTION match_startup_memory TO authenticated;
 GRANT EXECUTE ON FUNCTION match_startup_memory TO service_role;
 
+CREATE OR REPLACE FUNCTION match_build_memory(
+  query_embedding vector(3072),
+  match_threshold float,
+  match_count int
+)
+RETURNS TABLE (
+  id uuid,
+  content text,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    build_memory_entries.id,
+    build_memory_entries.content,
+    1 - (build_memory_entries.embedding <=> query_embedding) AS similarity
+  FROM build_memory_entries
+  WHERE build_memory_entries.embedding IS NOT NULL
+    AND 1 - (build_memory_entries.embedding <=> query_embedding) > match_threshold
+  ORDER BY 1 - (build_memory_entries.embedding <=> query_embedding) DESC
+  LIMIT match_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION match_build_memory TO anon;
+GRANT EXECUTE ON FUNCTION match_build_memory TO authenticated;
+GRANT EXECUTE ON FUNCTION match_build_memory TO service_role;
+
 INSERT INTO user_profile (desired_perception, target_audience, tone_guardrails, updated_at)
 SELECT '', '', '', now()
 WHERE NOT EXISTS (SELECT 1 FROM user_profile);
@@ -415,3 +572,35 @@ INSERT INTO startup_profiles (
 )
 SELECT '', '', '', '', '', '', '', '', '', now()
 WHERE NOT EXISTS (SELECT 1 FROM startup_profiles);
+
+INSERT INTO build_memory_entries (content, kind, metadata, embedding, created_at)
+SELECT
+  startup_memory_entries.content,
+  CASE
+    WHEN startup_memory_entries.kind = 'feature_update' THEN 'shipping_update'
+    ELSE startup_memory_entries.kind
+  END,
+  startup_memory_entries.metadata,
+  startup_memory_entries.embedding,
+  startup_memory_entries.created_at
+FROM startup_memory_entries
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM build_memory_entries
+  WHERE build_memory_entries.content = startup_memory_entries.content
+);
+
+INSERT INTO build_memory_entries (content, kind, metadata, embedding, created_at)
+SELECT
+  raw_ideas.content,
+  'project_log',
+  jsonb_build_object('original_capture_type', 'project_log'),
+  raw_ideas.embedding,
+  raw_ideas.created_at
+FROM raw_ideas
+WHERE raw_ideas.type = 'project_log'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM build_memory_entries
+    WHERE build_memory_entries.content = raw_ideas.content
+  );
