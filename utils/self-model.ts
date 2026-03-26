@@ -51,6 +51,12 @@ export const POST_ARCHETYPES = [
   "trend_reaction",
   "light_humor",
   "thread_seed",
+  "disagree_cleanly",
+  "add_specific_example",
+  "extend_with_framework",
+  "customer_pain_bridge",
+  "proof_backed_response",
+  "light_witty_response",
 ] as const;
 
 export const SURFACE_INTENTS = [
@@ -162,6 +168,9 @@ export type GeneratedTweetRecord = {
   status: string;
   created_at: string;
   generation_mode?: "general" | "build" | "startup";
+  draft_kind?: "original_post" | "reply" | "quote_post";
+  pillar_label?: string | null;
+  source_conversation_id?: string | null;
   theses?: string[] | null;
   alternates?: TweetAlternate[] | null;
   rationale?: string | null;
@@ -188,6 +197,17 @@ export type CaptureExtractionResult = {
     | "principle"
     | "question"
     | "event_reaction";
+  distribution_classification:
+    | "company_narrative"
+    | "customer_pain"
+    | "proof"
+    | "build_update"
+    | "reply_seed"
+    | "trend_reaction"
+    | "private_thought";
+  x_eligible: boolean;
+  suggested_pillar: string;
+  distribution_reason: string;
   should_ask_follow_up: boolean;
   follow_up_question: string;
   candidate_entries: SuggestedMindModelEntry[];

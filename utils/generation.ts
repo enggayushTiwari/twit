@@ -5,6 +5,12 @@ import type {
   SurfaceIntent,
 } from "./self-model";
 import type { StartupProfile } from "./startup";
+import type {
+  CompanyImageProfile,
+  DraftKind,
+  NarrativePillar,
+  ProofAsset,
+} from "./distribution";
 
 export type CreatorPersonaRecord = {
   handle: string;
@@ -26,6 +32,10 @@ type BuildGenerationSystemPromptParams = {
   confirmedEntries?: MindModelEntry[];
   currentObsessions?: string[];
   recentEventPovs?: string[];
+  companyImageProfile?: CompanyImageProfile | null;
+  narrativePillars?: NarrativePillar[];
+  proofAssets?: ProofAsset[];
+  distributionSignals?: string[];
 };
 
 type BuildCandidatePromptParams = {
@@ -74,6 +84,48 @@ function formatStringList(items: string[] | undefined) {
   return items.join("\n");
 }
 
+function formatCompanyImageProfile(profile: CompanyImageProfile | null | undefined) {
+  if (!profile) {
+    return "None";
+  }
+
+  return [
+    `Company: ${profile.company_name || "Unknown"}`,
+    `Known for: ${profile.known_for || "Not set"}`,
+    `Who it helps: ${profile.who_it_helps || "Not set"}`,
+    `Painful problem: ${profile.painful_problem || "Not set"}`,
+    `Proof points: ${profile.proof_points || "Not set"}`,
+    `Objections: ${profile.objection_patterns || "Not set"}`,
+    `Positioning: ${profile.positioning_statements || "Not set"}`,
+    `Bio direction: ${profile.bio_direction || "Not set"}`,
+    `Pinned post strategy: ${profile.pinned_post_strategy || "Not set"}`,
+    `Link intent: ${profile.link_intent || "Not set"}`,
+  ].join("\n");
+}
+
+function formatNarrativePillars(pillars: NarrativePillar[] | undefined) {
+  if (!pillars || pillars.length === 0) {
+    return "None";
+  }
+
+  return pillars
+    .filter((pillar) => pillar.active !== false)
+    .sort((left, right) => right.priority - left.priority)
+    .map((pillar) => `${pillar.label}: ${pillar.description}`)
+    .join("\n");
+}
+
+function formatProofAssets(proofAssets: ProofAsset[] | undefined) {
+  if (!proofAssets || proofAssets.length === 0) {
+    return "None";
+  }
+
+  return proofAssets
+    .slice(0, 8)
+    .map((item) => `[${item.kind}] ${item.title}: ${item.content}`)
+    .join("\n");
+}
+
 function getArchetypeDirective(archetype: PostArchetype) {
   switch (archetype) {
     case "question":
@@ -98,6 +150,18 @@ function getArchetypeDirective(archetype: PostArchetype) {
       return "Write like a light, funny, knowing post that still sounds intelligent and in-character.";
     case "thread_seed":
       return "Write like the opening tweet of a thread: compact, sharp, and expandable.";
+    case "disagree_cleanly":
+      return "Write like a clean disagreement that adds clarity instead of heat.";
+    case "add_specific_example":
+      return "Write like you are adding one concrete example that makes the point stronger.";
+    case "extend_with_framework":
+      return "Write like you are extending the conversation with a useful framework or mechanism.";
+    case "customer_pain_bridge":
+      return "Write like you are connecting the conversation back to real customer pain or workflow friction.";
+    case "proof_backed_response":
+      return "Write like a response grounded in proof, evidence, or lived product detail.";
+    case "light_witty_response":
+      return "Write like a light witty response that still sounds smart and on-brand.";
     default:
       return "Write in the user's authentic voice.";
   }
@@ -130,6 +194,10 @@ export function buildGenerationSystemPrompt({
   confirmedEntries,
   currentObsessions,
   recentEventPovs,
+  companyImageProfile,
+  narrativePillars,
+  proofAssets,
+  distributionSignals,
 }: BuildGenerationSystemPromptParams) {
   const desiredPerception = getProfileLine(
     profile?.desired_perception,
@@ -171,6 +239,22 @@ ${formatStringList(currentObsessions)}
 <recent_event_povs>
 ${formatStringList(recentEventPovs)}
 </recent_event_povs>
+
+<company_image>
+${formatCompanyImageProfile(companyImageProfile)}
+</company_image>
+
+<narrative_pillars>
+${formatNarrativePillars(narrativePillars)}
+</narrative_pillars>
+
+<proof_library>
+${formatProofAssets(proofAssets)}
+</proof_library>
+
+<distribution_learning>
+${formatStringList(distributionSignals)}
+</distribution_learning>
 
 <recent_content_history_DO_NOT_REPEAT>
 ${pastTweets}
@@ -270,6 +354,10 @@ type BuildStartupGenerationSystemPromptParams = {
   sharedMindModel?: MindModelEntry[];
   startupReflections?: string[];
   recentStartupTweets?: string;
+  companyImageProfile?: CompanyImageProfile | null;
+  narrativePillars?: NarrativePillar[];
+  proofAssets?: ProofAsset[];
+  distributionSignals?: string[];
 };
 
 export function buildStartupGenerationSystemPrompt({
@@ -278,6 +366,10 @@ export function buildStartupGenerationSystemPrompt({
   sharedMindModel,
   startupReflections,
   recentStartupTweets,
+  companyImageProfile,
+  narrativePillars,
+  proofAssets,
+  distributionSignals,
 }: BuildStartupGenerationSystemPromptParams) {
   const startupName = getProfileLine(startupProfile?.startup_name, "the user's startup");
   const oneLiner = getProfileLine(
@@ -335,6 +427,22 @@ ${formatMindModelEntries(sharedMindModel)}
 <startup_reflections>
 ${formatStringList(startupReflections)}
 </startup_reflections>
+
+<company_image>
+${formatCompanyImageProfile(companyImageProfile)}
+</company_image>
+
+<narrative_pillars>
+${formatNarrativePillars(narrativePillars)}
+</narrative_pillars>
+
+<proof_library>
+${formatProofAssets(proofAssets)}
+</proof_library>
+
+<distribution_learning>
+${formatStringList(distributionSignals)}
+</distribution_learning>
 
 <recent_startup_tweets_do_not_repeat>
 ${recentStartupTweets || "None"}
@@ -424,6 +532,138 @@ Return JSON only:
 
 Candidates:
 ${candidatesJson}`;
+}
+
+export function buildConversationGenerationSystemPrompt(params: {
+  draftKind: DraftKind;
+  conversationContext: string;
+  companyImageProfile: CompanyImageProfile | null;
+  narrativePillars?: NarrativePillar[];
+  proofAssets?: ProofAsset[];
+  sharedMindModel?: MindModelEntry[];
+  buildContext?: string;
+  recentDistributionDrafts?: string;
+  distributionSignals?: string[];
+}) {
+  const actionLabel = params.draftKind === "reply" ? "reply" : "quote post";
+
+  return `You are a world-class X distribution strategist for a founder-led company.
+Your mission is to write a ${actionLabel} that helps the account win qualified reach and strengthen company image.
+
+<company_image>
+${formatCompanyImageProfile(params.companyImageProfile)}
+</company_image>
+
+<narrative_pillars>
+${formatNarrativePillars(params.narrativePillars)}
+</narrative_pillars>
+
+<proof_library>
+${formatProofAssets(params.proofAssets)}
+</proof_library>
+
+<shared_worldview>
+${formatMindModelEntries(params.sharedMindModel)}
+</shared_worldview>
+
+<build_context>
+${params.buildContext || "None"}
+</build_context>
+
+<recent_distribution_drafts_do_not_repeat>
+${params.recentDistributionDrafts || "None"}
+</recent_distribution_drafts_do_not_repeat>
+
+<distribution_learning>
+${formatStringList(params.distributionSignals)}
+</distribution_learning>
+
+<conversation_context>
+${params.conversationContext}
+</conversation_context>
+
+CRITICAL INSTRUCTIONS:
+1. This is a distribution asset, not a generic wisdom post.
+2. Replies must feel native to the conversation and earn attention without sounding promotional.
+3. Quote posts may broaden the frame, but they must still connect back to company narrative, customer pain, proof, or category point of view.
+4. Do not summarize the source tweet back to the timeline.
+5. Prefer clarity, specificity, and strong point of view over ornamental phrasing.
+6. Keep it under 280 characters.
+7. If promotion would feel forced, do not force it; earn relevance first.`;
+}
+
+export function buildConversationCandidatePrompt(params: {
+  draftKind: DraftKind;
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+  conversationText: string;
+  thesisCount?: number;
+  draftCount?: number;
+}) {
+  return `Conversation seed:
+${params.conversationText}
+
+Draft kind: ${params.draftKind}
+Target archetype: ${params.targetArchetype}
+Target surface intent: ${params.surfaceIntent}
+Archetype directive: ${getArchetypeDirective(params.targetArchetype)}
+Surface directive: ${getSurfaceDirective(params.surfaceIntent)}
+
+Return JSON only with this shape:
+{
+  "theses": ["...", "..."],
+  "candidates": [
+    {
+      "thesis": "...",
+      "draft": "...",
+      "why_it_fits": "..."
+    }
+  ]
+}
+
+Rules:
+- Generate ${params.thesisCount || 3} theses and ${params.draftCount || 3} candidates.
+- For replies, write as if you are directly joining the conversation.
+- For quote posts, write as if you are using the source as a live prompt for your own angle.
+- Do not use hashtags or emojis.
+- Keep every draft under 280 characters.
+- why_it_fits should explain why the draft helps qualified reach and company image.`;
+}
+
+export function buildConversationCriticPrompt(params: {
+  candidatesJson: string;
+  draftKind: DraftKind;
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+}) {
+  return `You are a strict X distribution critic.
+Rank the candidates by how likely they are to earn qualified attention while still sounding authentic.
+
+Evaluate each candidate on:
+- native fit to the conversation
+- clarity
+- company-image usefulness
+- specificity
+- authenticity
+- ability to earn qualified reach
+- how well it executes the requested draft kind: ${params.draftKind}
+- how well it executes the requested archetype: ${params.targetArchetype}
+- how well it fits the requested surface intent: ${params.surfaceIntent}
+
+Return JSON only:
+{
+  "selected_index": 0,
+  "ranked": [
+    {
+      "draft_index": 0,
+      "score": 91,
+      "reason": "..."
+    }
+  ]
+}
+
+Candidates:
+${params.candidatesJson}`;
 }
 
 export function buildMediaPlanPrompt(params: {

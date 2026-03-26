@@ -9,6 +9,11 @@ import { getErrorMessage } from '../utils/errors';
 import { scrapeUrl } from '../utils/scraper';
 import type { BuildMemoryKind, GeneratedTweetMode } from '../utils/startup';
 import {
+    inferPillarLabel,
+    isXEligibleClassification,
+    normalizeDistributionClassification,
+} from '../utils/distribution';
+import {
     buildFeedbackSuggestion,
     calculateEditIntensity,
     FEEDBACK_TAG_OPTIONS,
@@ -77,6 +82,9 @@ type GeneratedTweetRow = {
     content: string;
     status: string;
     generation_mode: GeneratedTweetMode;
+    draft_kind?: 'original_post' | 'reply' | 'quote_post';
+    pillar_label?: string | null;
+    source_conversation_id?: string | null;
     theses: string[] | null;
     alternates:
         | Array<{
@@ -365,6 +373,10 @@ async function extractCaptureIntelligence(content: string, type: string) {
 Return JSON only:
 {
   "signal_type": "observation|belief|frustration|principle|question|event_reaction",
+  "distribution_classification": "company_narrative|customer_pain|proof|build_update|reply_seed|trend_reaction|private_thought",
+  "x_eligible": true,
+  "suggested_pillar": "...",
+  "distribution_reason": "...",
   "should_ask_follow_up": true,
   "follow_up_question": "...",
   "candidate_entries": [
@@ -388,6 +400,17 @@ Return JSON only:
 
     return {
         signal_type: parsed.signal_type || 'observation',
+        distribution_classification: normalizeDistributionClassification(
+            parsed.distribution_classification
+        ),
+        x_eligible:
+            typeof parsed.x_eligible === 'boolean'
+                ? parsed.x_eligible
+                : isXEligibleClassification(
+                      normalizeDistributionClassification(parsed.distribution_classification)
+                  ),
+        suggested_pillar: parsed.suggested_pillar?.trim() || '',
+        distribution_reason: parsed.distribution_reason?.trim() || '',
         should_ask_follow_up: Boolean(parsed.should_ask_follow_up),
         follow_up_question: parsed.follow_up_question?.trim() || '',
         candidate_entries: sanitizeSuggestedEntries(parsed.candidate_entries || []),
@@ -724,12 +747,26 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
             return { success: false, error: `Failed to generate correct embedding dimensions. Got ${embedding?.length}, expected ${EMBEDDING_DIMENSIONS}` };
         }
 
+        let extraction: Awaited<ReturnType<typeof extractCaptureIntelligence>> | null = null;
+        try {
+            extraction = await extractCaptureIntelligence(ideaText, type);
+        } catch (extractionError) {
+            console.error('Capture Extraction Error:', extractionError);
+        }
+
         let savedId = '';
         let reflectionContextType = 'raw_idea';
         let reflectionContextId = '';
 
         if (type === 'project_log') {
             const buildCapture = await deriveProjectLogBuildCapture(ideaText);
+            const distributionClassification = extraction?.distribution_classification || 'build_update';
+            const suggestedPillar =
+                extraction?.suggested_pillar ||
+                inferPillarLabel({
+                    classification: distributionClassification,
+                    content: ideaText,
+                });
 
             const { data: insertedBuildEntry, error: buildInsertError } = await supabase
                 .from('build_memory_entries')
@@ -744,6 +781,12 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
                             generalizable_takeaway: buildCapture.generalizable_takeaway,
                             takeaway_confidence: buildCapture.takeaway_confidence,
                             original_capture_type: 'project_log',
+                            distribution_classification: distributionClassification,
+                            x_eligible:
+                                extraction?.x_eligible ??
+                                isXEligibleClassification(distributionClassification),
+                            suggested_pillar: suggestedPillar,
+                            distribution_reason: extraction?.distribution_reason || '',
                         },
                     },
                 ])
@@ -787,6 +830,11 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
                                     build_memory_entry_id: insertedBuildEntry.id,
                                     original_capture_type: 'project_log',
                                     takeaway_confidence: buildCapture.takeaway_confidence,
+                                    distribution_classification: distributionClassification,
+                                    x_eligible:
+                                        extraction?.x_eligible ??
+                                        isXEligibleClassification(distributionClassification),
+                                    suggested_pillar: suggestedPillar,
                                 },
                             },
                         ]);
@@ -794,9 +842,31 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
                 }
             }
         } else {
+            const distributionClassification =
+                extraction?.distribution_classification || 'private_thought';
+            const suggestedPillar =
+                extraction?.suggested_pillar ||
+                inferPillarLabel({
+                    classification: distributionClassification,
+                    content: ideaText,
+                });
             const { data: insertedIdea, error: insertError } = await supabase
                 .from('raw_ideas')
-                .insert([{ content: ideaText, embedding, type }])
+                .insert([
+                    {
+                        content: ideaText,
+                        embedding,
+                        type,
+                        metadata: {
+                            distribution_classification: distributionClassification,
+                            x_eligible:
+                                extraction?.x_eligible ??
+                                isXEligibleClassification(distributionClassification),
+                            suggested_pillar: suggestedPillar,
+                            distribution_reason: extraction?.distribution_reason || '',
+                        },
+                    },
+                ])
                 .select('id, content, type, created_at')
                 .single();
 
@@ -814,15 +884,18 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
 
         try {
             const skippedCount = await getRecentSkippedCount('capture_followup');
-            const extraction = await extractCaptureIntelligence(ideaText, type);
-            signalType = extraction.signal_type;
+            signalType = extraction?.signal_type || 'observation';
             suggestedEntries = await upsertSuggestedEntries({
-                entries: extraction.candidate_entries,
+                entries: extraction?.candidate_entries || [],
                 sourceType: type === 'project_log' ? 'build_memory' : 'raw_idea',
                 sourceRefId: savedId,
             });
 
-            if (extraction.should_ask_follow_up && extraction.follow_up_question && skippedCount < 2) {
+            if (
+                extraction?.should_ask_follow_up &&
+                extraction.follow_up_question &&
+                skippedCount < 2
+            ) {
                 reflection = await createReflectionTurn({
                     mode: 'capture_followup',
                     prompt: extraction.follow_up_question,
@@ -852,6 +925,22 @@ export async function saveIdeaWithEmbedding(content: string, type: 'idea' | 'pro
                 signalType,
                 suggestedEntries,
                 reflection,
+                distributionClassification:
+                    extraction?.distribution_classification || 'private_thought',
+                xEligible:
+                    extraction?.x_eligible ??
+                    isXEligibleClassification(
+                        normalizeDistributionClassification(extraction?.distribution_classification)
+                    ),
+                suggestedPillar:
+                    extraction?.suggested_pillar ||
+                    inferPillarLabel({
+                        classification: normalizeDistributionClassification(
+                            extraction?.distribution_classification
+                        ),
+                        content: ideaText,
+                    }),
+                distributionReason: extraction?.distribution_reason || '',
             },
         };
     } catch (err: unknown) {
@@ -864,7 +953,7 @@ export async function getPendingTweets(mode: GeneratedTweetMode = 'general') {
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+            .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .eq('status', 'PENDING')
             .order('created_at', { ascending: false });
 
@@ -904,8 +993,40 @@ export async function updateTweetStatus(id: string, newContent: string, newStatu
     }
 }
 
+export async function markGeneratedTweetPublished(id: string) {
+    try {
+        const { error } = await supabase
+            .from('generated_tweets')
+            .update({ status: 'PUBLISHED' })
+            .eq('id', id);
+
+        if (error) {
+            return { success: false, error: 'Failed to update tweet status.' };
+        }
+
+        await supabase.from('distribution_outcomes').insert([
+            {
+                generated_tweet_id: id,
+                outcome_kind: 'posted_manually',
+                notes: '',
+            },
+        ]);
+
+        revalidatePath('/review');
+        revalidatePath('/distribution');
+        return { success: true };
+    } catch (err: unknown) {
+        return { success: false, error: getErrorMessage(err, 'Failed to mark post as published.') };
+    }
+}
+
 export async function deleteGeneratedTweet(id: string) {
     try {
+        await supabase
+            .from('distribution_outcomes')
+            .delete()
+            .eq('generated_tweet_id', id);
+
         await supabase
             .from('reflection_turns')
             .delete()
@@ -957,6 +1078,17 @@ export async function submitDraftDecision(input: DraftDecisionInput) {
                 freeform_note: input.freeformNote?.trim() || '',
             },
         ]);
+
+        if (input.newStatus === 'OPENED_IN_X' || input.newStatus === 'REJECTED') {
+            await supabase.from('distribution_outcomes').insert([
+                {
+                    generated_tweet_id: input.id,
+                    outcome_kind:
+                        input.newStatus === 'OPENED_IN_X' ? 'opened_in_x' : 'discarded',
+                    notes: input.freeformNote?.trim() || '',
+                },
+            ]);
+        }
 
         const feedbackSuggestions = await maybeCreateFeedbackSuggestions(filteredTags);
         const followUp = buildDraftFeedbackFollowUp({
@@ -1011,7 +1143,7 @@ export async function getTweetHistory(mode: GeneratedTweetMode | 'all' = 'all') 
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+            .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .neq('status', 'PENDING')
             .order('created_at', { ascending: false });
 

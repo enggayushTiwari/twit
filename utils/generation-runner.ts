@@ -3,6 +3,9 @@ import { GoogleGenAI } from '@google/genai';
 import {
   buildAuthenticityCriticPrompt,
   buildCandidateGenerationPrompt,
+  buildConversationCandidatePrompt,
+  buildConversationCriticPrompt,
+  buildConversationGenerationSystemPrompt,
   buildGenerationSystemPrompt,
   buildMediaPlanPrompt,
   buildStartupCandidateGenerationPrompt,
@@ -13,6 +16,15 @@ import {
 import { getErrorMessage } from './errors';
 import { parseJsonResponse } from './ai-json';
 import { GENERATION_MODEL } from './ai-config';
+import {
+  chooseConversationArchetype,
+  inferPillarLabel,
+  type CompanyImageProfile,
+  type ConversationOpportunity,
+  type DraftKind,
+  type NarrativePillar,
+  type ProofAsset,
+} from './distribution';
 import type {
   GenerationCandidate,
   GenerationDraftSet,
@@ -31,6 +43,11 @@ type RawIdeaRow = {
   content: string;
   embedding: number[] | null;
   type: string | null;
+  metadata?: {
+    distribution_classification?: string;
+    x_eligible?: boolean;
+    suggested_pillar?: string;
+  } | null;
 };
 
 type IdeaMatch = {
@@ -47,6 +64,8 @@ type BuildMemoryRow = {
     follow_up_answer?: string;
     generalizable_takeaway?: string;
     takeaway_confidence?: number;
+    distribution_classification?: string;
+    suggested_pillar?: string;
   } | null;
   embedding: number[] | null;
 };
@@ -83,6 +102,18 @@ type LiveTopicContext = {
   title: string;
   summary: string;
 } | null;
+
+type CompanyImageProfileRow = CompanyImageProfile | null;
+type NarrativePillarRow = NarrativePillar;
+type ProofAssetRow = ProofAsset;
+type DistributionSignalRow = {
+  outcome_kind: string;
+  impressions: number | null;
+  profile_visits: number | null;
+  follows_gained: number | null;
+  notes: string | null;
+};
+type ConversationOpportunityRow = ConversationOpportunity;
 
 type EventReflectionQueryClient = {
   from: (table: 'event_reflections') => {
@@ -248,6 +279,71 @@ function buildRankedCandidates(
     .sort((left, right) => right.score - left.score);
 }
 
+function summarizeDistributionSignals(rows: DistributionSignalRow[] | null | undefined) {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  return rows.map((row) => {
+    const metrics = [
+      typeof row.impressions === 'number' ? `${row.impressions} impressions` : '',
+      typeof row.profile_visits === 'number' ? `${row.profile_visits} profile visits` : '',
+      typeof row.follows_gained === 'number' ? `${row.follows_gained} follows` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    return [row.outcome_kind.replace(/_/g, ' '), metrics, row.notes || '']
+      .filter(Boolean)
+      .join(' | ');
+  });
+}
+
+async function getDistributionContext(
+  supabase: unknown
+): Promise<{
+  companyImageProfile: CompanyImageProfileRow;
+  narrativePillars: NarrativePillarRow[];
+  proofAssets: ProofAssetRow[];
+  distributionSignals: string[];
+}> {
+  const client = supabase as ReturnType<typeof createClient>;
+  const [companyProfileRow, pillarRows, proofRows, outcomeRows] = await Promise.all([
+    client
+      .from('company_image_profiles')
+      .select(
+        'id, company_name, known_for, who_it_helps, painful_problem, proof_points, objection_patterns, positioning_statements, bio_direction, header_concept, pinned_post_strategy, link_intent, updated_at'
+      )
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from('narrative_pillars')
+      .select('id, label, description, priority, active, created_at')
+      .eq('active', true)
+      .order('priority', { ascending: false })
+      .limit(8),
+    client
+      .from('proof_assets')
+      .select('id, kind, title, content, asset_url, proof_strength, created_at')
+      .order('proof_strength', { ascending: false })
+      .limit(8),
+    client
+      .from('distribution_outcomes')
+      .select('outcome_kind, impressions, profile_visits, follows_gained, notes')
+      .order('created_at', { ascending: false })
+      .limit(6),
+  ]);
+
+  return {
+    companyImageProfile: (companyProfileRow.data || null) as CompanyImageProfileRow,
+    narrativePillars: (pillarRows.data || []) as NarrativePillarRow[],
+    proofAssets: (proofRows.data || []) as ProofAssetRow[],
+    distributionSignals: summarizeDistributionSignals(
+      (outcomeRows.data || []) as DistributionSignalRow[]
+    ),
+  };
+}
+
 async function getLatestLiveTopicContext(
   supabase: EventReflectionQueryClient,
   mode: GeneratedTweetMode
@@ -320,18 +416,33 @@ export async function generateGeneralTweetDraft() {
 
     const { data: allIdeas } = await supabase
       .from('raw_ideas')
-      .select('id, content, embedding, type')
+      .select('id, content, embedding, type, metadata')
       .neq('type', 'project_log');
 
-    const validIdeas = ((allIdeas || []) as RawIdeaRow[])
+    const allValidIdeas = ((allIdeas || []) as RawIdeaRow[])
       .map((idea) => ({ ...idea, embedding: ensureArray(idea.embedding) }))
       .filter((idea) => idea.embedding.length > 0);
 
-    if (validIdeas.length === 0) {
+    const validIdeas = allValidIdeas.filter((idea) => {
+      const classification = idea.metadata?.distribution_classification;
+      return idea.metadata?.x_eligible !== false && classification !== 'private_thought';
+    });
+
+    const seedPool = validIdeas.length > 0 ? validIdeas : allValidIdeas;
+
+    if (seedPool.length === 0) {
       throw new Error('Ideas exist, but none have valid embeddings yet.');
     }
 
-    const seedIdea = validIdeas[Math.floor(Math.random() * validIdeas.length)];
+    const preferredSeedPool = seedPool.filter((idea) =>
+      ['company_narrative', 'customer_pain', 'proof', 'trend_reaction', 'reply_seed'].includes(
+        idea.metadata?.distribution_classification || ''
+      )
+    );
+    const seedIdea =
+      (preferredSeedPool.length > 0 ? preferredSeedPool : seedPool)[
+        Math.floor(Math.random() * (preferredSeedPool.length > 0 ? preferredSeedPool.length : seedPool.length))
+      ];
 
     const { data: relatedIdeas, error: matchError } = await supabase.rpc('match_ideas', {
       query_embedding: seedIdea.embedding,
@@ -371,6 +482,8 @@ export async function generateGeneralTweetDraft() {
       .order('updated_at', { ascending: false })
       .limit(6);
 
+    const distributionContext = await getDistributionContext(supabase);
+
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
       .select('content, post_archetype, surface_intent, created_at')
@@ -402,6 +515,10 @@ export async function generateGeneralTweetDraft() {
       confirmedEntries: ((worldviewRows || []) as MindModelEntry[]) || [],
       currentObsessions: (obsessionRows || []).map((row) => row.statement).filter(Boolean),
       recentEventPovs: (eventPovRows || []).map((row) => row.statement).filter(Boolean),
+      companyImageProfile: distributionContext.companyImageProfile,
+      narrativePillars: distributionContext.narrativePillars,
+      proofAssets: distributionContext.proofAssets,
+      distributionSignals: distributionContext.distributionSignals,
     });
 
     const generationResponse = await ai.models.generateContent({
@@ -489,6 +606,7 @@ export async function generateGeneralTweetDraft() {
           content: selectedCandidate.draft,
           status: 'PENDING',
           generation_mode: 'general',
+          draft_kind: 'original_post',
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
@@ -496,9 +614,17 @@ export async function generateGeneralTweetDraft() {
           surface_intent: postPlan.surfaceIntent,
           media_plan: mediaPlan,
           source_memory_scope: 'general',
+          pillar_label: inferPillarLabel({
+            classification: (seedIdea.metadata?.distribution_classification as
+              | Parameters<typeof inferPillarLabel>[0]['classification']
+              | undefined) || null,
+            content: seedIdea.content,
+            availablePillars: distributionContext.narrativePillars,
+          }),
+          source_conversation_id: null,
         },
       ])
-      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -568,6 +694,8 @@ export async function generateBuildTweetDraft() {
       .order('created_at', { ascending: false })
       .limit(8);
 
+    const distributionContext = await getDistributionContext(supabase);
+
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
       .select('content, post_archetype, surface_intent, created_at')
@@ -601,6 +729,10 @@ export async function generateBuildTweetDraft() {
       recentStartupTweets:
         ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.content).join('\n') ||
         'None',
+      companyImageProfile: distributionContext.companyImageProfile,
+      narrativePillars: distributionContext.narrativePillars,
+      proofAssets: distributionContext.proofAssets,
+      distributionSignals: distributionContext.distributionSignals,
     });
 
     const generationResponse = await ai.models.generateContent({
@@ -688,6 +820,7 @@ export async function generateBuildTweetDraft() {
           content: selectedCandidate.draft,
           status: 'PENDING',
           generation_mode: 'build',
+          draft_kind: 'original_post',
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
@@ -695,9 +828,17 @@ export async function generateBuildTweetDraft() {
           surface_intent: postPlan.surfaceIntent,
           media_plan: mediaPlan,
           source_memory_scope: 'build',
+          pillar_label: inferPillarLabel({
+            classification: (seedEntry.metadata?.distribution_classification as
+              | Parameters<typeof inferPillarLabel>[0]['classification']
+              | undefined) || null,
+            content: seedEntry.content,
+            availablePillars: distributionContext.narrativePillars,
+          }),
+          source_conversation_id: null,
         },
       ])
-      .select('id, content, status, generation_mode, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -709,6 +850,216 @@ export async function generateBuildTweetDraft() {
     return {
       success: false as const,
       error: getErrorMessage(error, 'An unexpected build generation error occurred.'),
+    };
+  }
+}
+
+export async function generateConversationDraft(params: {
+  draftKind: DraftKind;
+  conversationOpportunityId: string;
+}) {
+  try {
+    const { ai, supabase } = createClients();
+
+    const [{ data: conversation }, { data: worldviewRows }, { data: recentTweets }, distributionContext, { data: buildRows }] =
+      await Promise.all([
+        supabase
+          .from('conversation_opportunities')
+          .select(
+            'id, source_type, source_url, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
+          )
+          .eq('id', params.conversationOpportunityId)
+          .maybeSingle(),
+        supabase
+          .from('mind_model_entries')
+          .select(
+            'id, kind, statement, status, confidence, priority, source_type, source_ref_id, tags, evidence_summary, created_at, updated_at'
+          )
+          .eq('status', 'confirmed')
+          .in('kind', ['belief', 'lens', 'taste_like', 'taste_avoid', 'voice_rule'])
+          .order('priority', { ascending: false })
+          .limit(18),
+        supabase
+          .from('generated_tweets')
+          .select('content, post_archetype, surface_intent, created_at')
+          .eq('generation_mode', 'build')
+          .in('draft_kind', ['reply', 'quote_post'])
+          .order('created_at', { ascending: false })
+          .limit(12),
+        getDistributionContext(supabase),
+        supabase
+          .from('build_memory_entries')
+          .select('kind, content')
+          .order('created_at', { ascending: false })
+          .limit(6),
+      ]);
+
+    const conversationRow = (conversation || null) as ConversationOpportunityRow | null;
+    if (!conversationRow) {
+      throw new Error('Conversation opportunity not found.');
+    }
+
+    const targetArchetype = chooseConversationArchetype({
+      draftKind: params.draftKind,
+      recommendedAction: conversationRow.recommended_action,
+      content: conversationRow.content,
+      recentArchetypes: ((recentTweets || []) as RecentTweetRow[]).map(
+        (tweet) => tweet.post_archetype
+      ),
+    });
+    const surfaceIntent: SurfaceIntent =
+      params.draftKind === 'reply'
+        ? 'conversation_starter'
+        : conversationRow.recommended_action === 'quote'
+        ? 'news_reaction'
+        : 'feed_post';
+
+    const buildContext =
+      ((buildRows || []) as Array<{ kind: string; content: string }>)
+        .map((row) => `[${row.kind}] ${row.content}`)
+        .join('\n') || 'None';
+    const conversationContext = [
+      conversationRow.author_name || conversationRow.author_handle
+        ? `Author: ${conversationRow.author_name || ''} ${
+            conversationRow.author_handle ? `(@${conversationRow.author_handle})` : ''
+          }`.trim()
+        : '',
+      conversationRow.source_url ? `Source URL: ${conversationRow.source_url}` : '',
+      `Recommended action: ${conversationRow.recommended_action}`,
+      conversationRow.topic_tags.length > 0
+        ? `Topic tags: ${conversationRow.topic_tags.join(', ')}`
+        : '',
+      conversationRow.why_it_matters ? `Why it matters: ${conversationRow.why_it_matters}` : '',
+      `Conversation text:\n${conversationRow.content}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const systemPrompt = buildConversationGenerationSystemPrompt({
+      draftKind: params.draftKind,
+      conversationContext,
+      companyImageProfile: distributionContext.companyImageProfile,
+      narrativePillars: distributionContext.narrativePillars,
+      proofAssets: distributionContext.proofAssets,
+      sharedMindModel: ((worldviewRows || []) as MindModelEntry[]) || [],
+      buildContext,
+      recentDistributionDrafts:
+        ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.content).join('\n') ||
+        'None',
+      distributionSignals: distributionContext.distributionSignals,
+    });
+
+    const generationResponse = await ai.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: buildConversationCandidatePrompt({
+        draftKind: params.draftKind,
+        targetArchetype,
+        surfaceIntent,
+        conversationText: conversationContext,
+      }),
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.8,
+      },
+    });
+
+    const draftSet = normalizeDraftSet(
+      parseJsonResponse<GenerationDraftSet>(
+        generationResponse.text || '',
+        'Conversation generation returned invalid structured output'
+      )
+    );
+
+    if (draftSet.candidates.length === 0) {
+      throw new Error('Conversation generation returned no usable candidates.');
+    }
+
+    const criticResponse = await ai.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: buildConversationCriticPrompt({
+        candidatesJson: JSON.stringify(draftSet, null, 2),
+        draftKind: params.draftKind,
+        targetArchetype,
+        surfaceIntent,
+      }),
+      config: {
+        systemInstruction:
+          'You are a strict X distribution evaluator. Return JSON only and never add prose outside the schema.',
+        temperature: 0.2,
+      },
+    });
+
+    const rankedResult = normalizeRankedResult(
+      parseJsonResponse<RankedGenerationResult>(
+        criticResponse.text || '',
+        'Conversation critic returned invalid structured output'
+      )
+    );
+
+    const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
+    const selectedCandidate =
+      draftSet.candidates[rankedResult.selected_index] ||
+      rankedCandidates[0] ||
+      draftSet.candidates[0];
+
+    if (!selectedCandidate) {
+      throw new Error('No conversation draft could be selected.');
+    }
+
+    const selectedRanking =
+      rankedCandidates.find((candidate) => candidate.draft === selectedCandidate.draft) || null;
+    const alternates: TweetAlternate[] = rankedCandidates
+      .filter((candidate) => candidate.draft !== selectedCandidate.draft)
+      .slice(0, 2)
+      .map((candidate) => ({
+        draft: candidate.draft,
+        thesis: candidate.thesis,
+        why_it_fits: candidate.why_it_fits,
+        score: candidate.score,
+      }));
+    const mediaPlan = await planMediaForDraft({
+      ai,
+      draft: selectedCandidate.draft,
+      archetype: targetArchetype,
+      surfaceIntent,
+    });
+
+    const { data: insertedTweet, error: insertError } = await supabase
+      .from('generated_tweets')
+      .insert([
+        {
+          content: selectedCandidate.draft,
+          status: 'PENDING',
+          generation_mode: 'build',
+          draft_kind: params.draftKind,
+          pillar_label: inferPillarLabel({
+            content: conversationRow.content,
+            availablePillars: distributionContext.narrativePillars,
+          }),
+          source_conversation_id: conversationRow.id,
+          theses: draftSet.theses,
+          alternates,
+          rationale: [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || '']
+            .filter(Boolean)
+            .join('\n\n'),
+          post_archetype: targetArchetype,
+          surface_intent: surfaceIntent,
+          media_plan: mediaPlan,
+          source_memory_scope: 'mixed',
+        },
+      ])
+      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .single();
+
+    if (insertError || !insertedTweet) {
+      throw new Error('Failed to save the conversation draft.');
+    }
+
+    return { success: true as const, tweet: insertedTweet };
+  } catch (error) {
+    return {
+      success: false as const,
+      error: getErrorMessage(error, 'An unexpected conversation generation error occurred.'),
     };
   }
 }

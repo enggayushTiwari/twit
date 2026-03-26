@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
   content text NOT NULL,
   status text NOT NULL DEFAULT 'PENDING',
   generation_mode text NOT NULL DEFAULT 'general',
+  draft_kind text NOT NULL DEFAULT 'original_post',
+  pillar_label text,
+  source_conversation_id uuid,
   theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   rationale text NOT NULL DEFAULT '',
@@ -36,6 +39,9 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
 ALTER TABLE generated_tweets 
   ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'PENDING',
   ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general',
+  ADD COLUMN IF NOT EXISTS draft_kind text NOT NULL DEFAULT 'original_post',
+  ADD COLUMN IF NOT EXISTS pillar_label text,
+  ADD COLUMN IF NOT EXISTS source_conversation_id uuid,
   ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '',
@@ -64,6 +70,13 @@ ALTER TABLE generated_tweets
   ADD CONSTRAINT generated_tweets_generation_mode_check
   CHECK (generation_mode IN ('general', 'build', 'startup'));
 
+ALTER TABLE generated_tweets
+  DROP CONSTRAINT IF EXISTS generated_tweets_draft_kind_check;
+
+ALTER TABLE generated_tweets
+  ADD CONSTRAINT generated_tweets_draft_kind_check
+  CHECK (draft_kind IN ('original_post', 'reply', 'quote_post'));
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -86,7 +99,13 @@ BEGIN
           'founder_belief',
           'trend_reaction',
           'light_humor',
-          'thread_seed'
+          'thread_seed',
+          'disagree_cleanly',
+          'add_specific_example',
+          'extend_with_framework',
+          'customer_pain_bridge',
+          'proof_backed_response',
+          'light_witty_response'
         )
       );
   END IF;
@@ -399,6 +418,150 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS company_image_profiles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_name text NOT NULL DEFAULT '',
+  known_for text NOT NULL DEFAULT '',
+  who_it_helps text NOT NULL DEFAULT '',
+  painful_problem text NOT NULL DEFAULT '',
+  proof_points text NOT NULL DEFAULT '',
+  objection_patterns text NOT NULL DEFAULT '',
+  positioning_statements text NOT NULL DEFAULT '',
+  bio_direction text NOT NULL DEFAULT '',
+  header_concept text NOT NULL DEFAULT '',
+  pinned_post_strategy text NOT NULL DEFAULT '',
+  link_intent text NOT NULL DEFAULT '',
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS narrative_pillars (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  label text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  priority int NOT NULL DEFAULT 2,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS proof_assets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind text NOT NULL DEFAULT 'product_change',
+  title text NOT NULL,
+  content text NOT NULL DEFAULT '',
+  asset_url text,
+  proof_strength int NOT NULL DEFAULT 3,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'proof_assets_kind_check'
+  ) THEN
+    ALTER TABLE proof_assets
+      ADD CONSTRAINT proof_assets_kind_check
+      CHECK (kind IN ('screenshot', 'demo', 'metric', 'customer_quote', 'product_change'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS target_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  handle text NOT NULL,
+  display_name text NOT NULL DEFAULT '',
+  reason text NOT NULL DEFAULT '',
+  priority int NOT NULL DEFAULT 2,
+  monitoring_notes text NOT NULL DEFAULT '',
+  created_at timestamp with time zone DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_opportunities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_type text NOT NULL DEFAULT 'manual_paste',
+  source_url text,
+  author_handle text,
+  author_name text,
+  content text NOT NULL,
+  topic_tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  why_it_matters text NOT NULL DEFAULT '',
+  recommended_action text NOT NULL DEFAULT 'reply',
+  status text NOT NULL DEFAULT 'new',
+  raw_input text NOT NULL DEFAULT '',
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'conversation_opportunities_source_type_check'
+  ) THEN
+    ALTER TABLE conversation_opportunities
+      ADD CONSTRAINT conversation_opportunities_source_type_check
+      CHECK (source_type IN ('tweet_url', 'search_url', 'profile_url', 'manual_paste', 'thread_text'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'conversation_opportunities_recommended_action_check'
+  ) THEN
+    ALTER TABLE conversation_opportunities
+      ADD CONSTRAINT conversation_opportunities_recommended_action_check
+      CHECK (recommended_action IN ('reply', 'quote', 'ignore', 'save_as_event'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'conversation_opportunities_status_check'
+  ) THEN
+    ALTER TABLE conversation_opportunities
+      ADD CONSTRAINT conversation_opportunities_status_check
+      CHECK (status IN ('new', 'used', 'ignored', 'saved_as_event'));
+  END IF;
+END $$;
+
+ALTER TABLE generated_tweets
+  DROP CONSTRAINT IF EXISTS generated_tweets_source_conversation_id_fkey;
+
+ALTER TABLE generated_tweets
+  ADD CONSTRAINT generated_tweets_source_conversation_id_fkey
+  FOREIGN KEY (source_conversation_id)
+  REFERENCES conversation_opportunities(id)
+  ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS distribution_outcomes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  generated_tweet_id uuid NOT NULL REFERENCES generated_tweets(id) ON DELETE CASCADE,
+  outcome_kind text NOT NULL DEFAULT 'performance_update',
+  impressions int,
+  likes int,
+  replies int,
+  reposts int,
+  bookmarks int,
+  profile_visits int,
+  follows_gained int,
+  link_clicks int,
+  notes text NOT NULL DEFAULT '',
+  created_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'distribution_outcomes_kind_check'
+  ) THEN
+    ALTER TABLE distribution_outcomes
+      ADD CONSTRAINT distribution_outcomes_kind_check
+      CHECK (outcome_kind IN ('opened_in_x', 'posted_manually', 'discarded', 'performance_update'));
+  END IF;
+END $$;
+
 ALTER TABLE raw_ideas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE generated_tweets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profile ENABLE ROW LEVEL SECURITY;
@@ -412,6 +575,12 @@ ALTER TABLE mind_model_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reflection_turns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE draft_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_reflections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_image_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE narrative_pillars ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proof_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE target_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_opportunities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE distribution_outcomes ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow anonymous inserts" ON raw_ideas;
 DROP POLICY IF EXISTS "Allow anonymous reads" ON raw_ideas;
@@ -463,6 +632,24 @@ CREATE POLICY "Allow all access to draft_feedback" ON draft_feedback FOR ALL TO 
 
 DROP POLICY IF EXISTS "Allow all access to event_reflections" ON event_reflections;
 CREATE POLICY "Allow all access to event_reflections" ON event_reflections FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to company_image_profiles" ON company_image_profiles;
+CREATE POLICY "Allow all access to company_image_profiles" ON company_image_profiles FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to narrative_pillars" ON narrative_pillars;
+CREATE POLICY "Allow all access to narrative_pillars" ON narrative_pillars FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to proof_assets" ON proof_assets;
+CREATE POLICY "Allow all access to proof_assets" ON proof_assets FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to target_accounts" ON target_accounts;
+CREATE POLICY "Allow all access to target_accounts" ON target_accounts FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to conversation_opportunities" ON conversation_opportunities;
+CREATE POLICY "Allow all access to conversation_opportunities" ON conversation_opportunities FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to distribution_outcomes" ON distribution_outcomes;
+CREATE POLICY "Allow all access to distribution_outcomes" ON distribution_outcomes FOR ALL TO public USING (true) WITH CHECK (true);
 
 CREATE OR REPLACE FUNCTION match_ideas(
   query_embedding vector(3072),

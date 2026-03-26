@@ -7,6 +7,7 @@ import {
   getPendingTweets,
   getReviewLearningState,
   getTweetHistory,
+  markGeneratedTweetPublished,
   skipReflectionTurn,
   submitDraftDecision,
 } from '../actions';
@@ -28,6 +29,7 @@ import { getReviewStatusLabel, isReadyToPost } from '@/utils/review-status';
 import type { GeneratedTweetMode } from '@/utils/startup';
 
 type Tab = 'pending' | 'history';
+type DraftKindFilter = 'all' | 'original_post' | 'reply' | 'quote_post';
 
 function getActionError(result: unknown, fallback: string) {
   if (
@@ -47,6 +49,8 @@ export default function ReviewDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('pending');
   const [pendingMode, setPendingMode] = useState<GeneratedTweetMode>('general');
   const [historyMode, setHistoryMode] = useState<GeneratedTweetMode | 'all'>('all');
+  const [pendingDraftKind, setPendingDraftKind] = useState<DraftKindFilter>('all');
+  const [historyDraftKind, setHistoryDraftKind] = useState<DraftKindFilter>('all');
   const [tweets, setTweets] = useState<GeneratedTweetRecord[]>([]);
   const [historyTweets, setHistoryTweets] = useState<GeneratedTweetRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +62,13 @@ export default function ReviewDashboard() {
   const [feedbackTagsById, setFeedbackTagsById] = useState<Record<string, FeedbackTag[]>>({});
   const [feedbackNotesById, setFeedbackNotesById] = useState<Record<string, string>>({});
   const [draftFeedbackReflection, setDraftFeedbackReflection] = useState<ReflectionTurn | null>(null);
+
+  const visiblePendingTweets = tweets.filter(
+    (tweet) => pendingDraftKind === 'all' || tweet.draft_kind === pendingDraftKind
+  );
+  const visibleHistoryTweets = historyTweets.filter(
+    (tweet) => historyDraftKind === 'all' || tweet.draft_kind === historyDraftKind
+  );
 
   async function refreshPendingTweets(mode: GeneratedTweetMode = pendingMode) {
     const result = await getPendingTweets(mode);
@@ -262,6 +273,23 @@ export default function ReviewDashboard() {
     window.setTimeout(() => setToast(null), 2800);
   }
 
+  async function handleMarkPublished(tweetId: string) {
+    setActiveActionId(tweetId);
+    setError(null);
+
+    const result = await markGeneratedTweetPublished(tweetId);
+    setActiveActionId(null);
+
+    if (!result.success) {
+      setError(getActionError(result, 'Failed to mark post as published.'));
+      return;
+    }
+
+    await refreshHistoryTweets(historyMode);
+    setToast('Marked as published and saved as a distribution outcome.');
+    window.setTimeout(() => setToast(null), 2800);
+  }
+
   async function handleReflectionAnswer(answer: string) {
     if (!draftFeedbackReflection) {
       return;
@@ -374,6 +402,31 @@ export default function ReviewDashboard() {
               </span>
             </div>
           ) : null}
+
+          <div className="mt-4 flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1 w-fit">
+            {(['all', 'original_post', 'reply', 'quote_post'] as const).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() =>
+                  activeTab === 'pending' ? setPendingDraftKind(kind) : setHistoryDraftKind(kind)
+                }
+                className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+                  (activeTab === 'pending' ? pendingDraftKind : historyDraftKind) === kind
+                    ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {kind === 'all'
+                  ? 'All Drafts'
+                  : kind === 'original_post'
+                  ? 'Original Posts'
+                  : kind === 'reply'
+                  ? 'Replies'
+                  : 'Quote Posts'}
+              </button>
+            ))}
+          </div>
         </header>
 
         {draftFeedbackReflection ? (
@@ -403,7 +456,7 @@ export default function ReviewDashboard() {
 
         {activeTab === 'pending' ? (
           <div className="mt-8 space-y-6">
-            {tweets.length === 0 && !error ? (
+            {visiblePendingTweets.length === 0 && !error ? (
               <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
                 {pendingMode === 'build' || pendingMode === 'startup'
                   ? 'No pending build drafts right now. Generate one from the build workspace or here.'
@@ -411,7 +464,7 @@ export default function ReviewDashboard() {
               </div>
             ) : null}
 
-            {tweets.map((tweet) => {
+            {visiblePendingTweets.map((tweet) => {
               const feedbackTags = feedbackTagsById[tweet.id] || [];
               const feedbackNote = feedbackNotesById[tweet.id] || '';
               const isWorking = activeActionId === tweet.id;
@@ -425,6 +478,16 @@ export default function ReviewDashboard() {
                     <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                       {tweet.generation_mode === 'build' || tweet.generation_mode === 'startup' ? 'Build' : 'General'}
                     </span>
+                    {tweet.draft_kind ? (
+                      <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                        {tweet.draft_kind === 'original_post'
+                          ? 'Original post'
+                          : tweet.draft_kind === 'reply'
+                          ? 'Reply'
+                          : 'Quote post'}
+                      </span>
+                    ) : null}
+                    {tweet.pillar_label ? <span>{tweet.pillar_label}</span> : null}
                     {tweet.post_archetype ? (
                       <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                         {tweet.post_archetype.replace(/_/g, ' ')}
@@ -619,7 +682,7 @@ export default function ReviewDashboard() {
               </div>
             ) : null}
 
-            {!historyLoading && historyTweets.length === 0 && !error ? (
+            {!historyLoading && visibleHistoryTweets.length === 0 && !error ? (
               <div className="rounded-xl border border-zinc-900 border-dashed py-20 text-center text-zinc-600">
                 No history yet. Approve, reject, or open some drafts in X to build the learning
                 trail.
@@ -627,7 +690,7 @@ export default function ReviewDashboard() {
             ) : null}
 
             {!historyLoading &&
-              historyTweets.map((tweet) => (
+              visibleHistoryTweets.map((tweet) => (
                 <div
                   key={tweet.id}
                   className="rounded-2xl border border-zinc-900 bg-zinc-950 p-5 transition-all hover:border-zinc-800"
@@ -638,6 +701,16 @@ export default function ReviewDashboard() {
                         <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                           {tweet.generation_mode === 'build' || tweet.generation_mode === 'startup' ? 'Build' : 'General'}
                         </span>
+                        {tweet.draft_kind ? (
+                          <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
+                            {tweet.draft_kind === 'original_post'
+                              ? 'Original post'
+                              : tweet.draft_kind === 'reply'
+                              ? 'Reply'
+                              : 'Quote post'}
+                          </span>
+                        ) : null}
+                        {tweet.pillar_label ? <span>{tweet.pillar_label}</span> : null}
                         {tweet.post_archetype ? (
                           <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
                             {tweet.post_archetype.replace(/_/g, ' ')}
@@ -714,6 +787,21 @@ export default function ReviewDashboard() {
                           <Twitter className="h-3.5 w-3.5 fill-current" />
                         )}
                         Open in X
+                      </button>
+                    ) : null}
+                    {(tweet.status === 'APPROVED' || tweet.status === 'OPENED_IN_X') ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleMarkPublished(tweet.id)}
+                        disabled={activeActionId === tweet.id}
+                        className="flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-xs font-bold text-zinc-200 transition-all hover:border-zinc-500 disabled:opacity-50"
+                      >
+                        {activeActionId === tweet.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
+                        Mark Posted
                       </button>
                     ) : null}
                   </div>
