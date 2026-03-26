@@ -11,6 +11,7 @@ export const DISTRIBUTION_CLASSIFICATIONS = [
 ] as const;
 
 export const DRAFT_KINDS = ['original_post', 'reply', 'quote_post'] as const;
+export const COMMUNITY_AUDIENCE_FOCUSES = ['builders', 'customers', 'mixed'] as const;
 
 export const CONVERSATION_RECOMMENDED_ACTIONS = [
   'reply',
@@ -46,6 +47,7 @@ export const OUTCOME_KINDS = [
 
 export type DistributionClassification = (typeof DISTRIBUTION_CLASSIFICATIONS)[number];
 export type DraftKind = (typeof DRAFT_KINDS)[number];
+export type CommunityAudienceFocus = (typeof COMMUNITY_AUDIENCE_FOCUSES)[number];
 export type ConversationRecommendedAction = (typeof CONVERSATION_RECOMMENDED_ACTIONS)[number];
 export type ConversationSourceType = (typeof CONVERSATION_SOURCE_TYPES)[number];
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
@@ -77,6 +79,22 @@ export type NarrativePillar = {
   created_at: string;
 };
 
+export type CommunityProfile = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  audience_focus: CommunityAudienceFocus;
+  tone_rules: string;
+  common_topics: string[];
+  preferred_post_shapes: string[];
+  taboo_patterns: string;
+  why_you_belong: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProofAsset = {
   id: string;
   kind: ProofAssetKind;
@@ -101,6 +119,8 @@ export type ConversationOpportunity = {
   id: string;
   source_type: ConversationSourceType;
   source_url: string | null;
+  community_profile_id: string | null;
+  community_label: string | null;
   author_handle: string | null;
   author_name: string | null;
   content: string;
@@ -134,6 +154,10 @@ export function isDistributionClassification(value: string): value is Distributi
 
 export function isDraftKind(value: string): value is DraftKind {
   return (DRAFT_KINDS as readonly string[]).includes(value);
+}
+
+export function isCommunityAudienceFocus(value: string): value is CommunityAudienceFocus {
+  return (COMMUNITY_AUDIENCE_FOCUSES as readonly string[]).includes(value);
 }
 
 export function isConversationRecommendedAction(
@@ -171,6 +195,15 @@ export function normalizeStringList(value: unknown): string[] {
   }
 
   return value.map(String).map((item) => item.trim()).filter(Boolean);
+}
+
+export function slugifyCommunityName(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
 }
 
 export function isXEligibleClassification(classification: DistributionClassification) {
@@ -238,6 +271,19 @@ export function getDraftKindLabel(kind: DraftKind) {
       return 'Quote post';
     default:
       return kind;
+  }
+}
+
+export function getCommunityAudienceLabel(focus: CommunityAudienceFocus) {
+  switch (focus) {
+    case 'builders':
+      return 'Builders';
+    case 'customers':
+      return 'Customers';
+    case 'mixed':
+      return 'Mixed audience';
+    default:
+      return focus;
   }
 }
 
@@ -362,6 +408,43 @@ export function chooseConversationArchetype(params: {
 
   const alternative = candidates.find((archetype) => !recent.includes(archetype));
   return alternative || preferred;
+}
+
+export function chooseCommunityPostArchetype(params: {
+  contentHints?: string[];
+  recentArchetypes?: Array<PostArchetype | null | undefined>;
+}) {
+  const recent = (params.recentArchetypes || []).filter(Boolean) as PostArchetype[];
+  const content = (params.contentHints || []).join(' ').toLowerCase();
+  const candidates: PostArchetype[] = [
+    'add_specific_example',
+    'extend_with_framework',
+    'proof_backed_response',
+    'customer_pain_bridge',
+    'build_update',
+    'founder_belief',
+    'question',
+    'thread_seed',
+  ];
+
+  let preferred: PostArchetype = 'add_specific_example';
+  if (/\bmetric|result|proof|traction|usage|data\b/.test(content)) {
+    preferred = 'proof_backed_response';
+  } else if (/\bworkflow|customer|pain|problem|friction\b/.test(content)) {
+    preferred = 'customer_pain_bridge';
+  } else if (/\bship|launch|release|demo|feature|build\b/.test(content)) {
+    preferred = 'build_update';
+  } else if (/\bwhy|framework|system|incentive|pattern\b/.test(content)) {
+    preferred = 'extend_with_framework';
+  } else if (/\bquestion|ask|wonder\b/.test(content)) {
+    preferred = 'question';
+  }
+
+  if (!recent.includes(preferred)) {
+    return preferred;
+  }
+
+  return candidates.find((candidate) => !recent.includes(candidate)) || preferred;
 }
 
 export function summarizeOutcomeSignals(outcomes: DistributionOutcome[]) {

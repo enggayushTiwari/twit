@@ -18,12 +18,13 @@ test('choosePostPlan avoids repeating the last archetype', () => {
     hasLiveTopic: false,
     now: new Date('2026-03-26T09:00:00.000Z'),
     recentPosts: [
-      { post_archetype: 'question', surface_intent: 'conversation_starter' },
-      { post_archetype: 'hard_statement', surface_intent: 'feed_post' },
+      { post_archetype: 'question', post_format: 'question', surface_intent: 'conversation_starter' },
+      { post_archetype: 'hard_statement', post_format: 'one_liner', surface_intent: 'feed_post' },
     ],
   });
 
   assert.notEqual(plan.archetype, 'question');
+  assert.notEqual(plan.postFormat, 'question');
 });
 
 test('recommendTopicArchetype favors trend reaction for startup and technology topics', () => {

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useEffectEvent, useState } from 'react';
 import {
   answerReflectionTurn,
@@ -30,6 +31,23 @@ import type { GeneratedTweetMode } from '@/utils/startup';
 
 type Tab = 'pending' | 'history';
 type DraftKindFilter = 'all' | 'original_post' | 'reply' | 'quote_post';
+
+function getPostFormatLabel(format: GeneratedTweetRecord['post_format']) {
+  switch (format) {
+    case 'one_liner':
+      return 'One-liner';
+    case 'question':
+      return 'Question';
+    case 'multi_line_insight':
+      return 'Multi-line insight';
+    case 'build_update':
+      return 'Build update';
+    case 'reply_style':
+      return 'Reply-style';
+    default:
+      return null;
+  }
+}
 
 function getActionError(result: unknown, fallback: string) {
   if (
@@ -62,6 +80,8 @@ export default function ReviewDashboard() {
   const [feedbackTagsById, setFeedbackTagsById] = useState<Record<string, FeedbackTag[]>>({});
   const [feedbackNotesById, setFeedbackNotesById] = useState<Record<string, string>>({});
   const [draftFeedbackReflection, setDraftFeedbackReflection] = useState<ReflectionTurn | null>(null);
+  const [mediaPreviewById, setMediaPreviewById] = useState<Record<string, string>>({});
+  const [mediaLoadingById, setMediaLoadingById] = useState<Record<string, boolean>>({});
 
   const visiblePendingTweets = tweets.filter(
     (tweet) => pendingDraftKind === 'all' || tweet.draft_kind === pendingDraftKind
@@ -316,6 +336,40 @@ export default function ReviewDashboard() {
     setDraftFeedbackReflection(null);
   }
 
+  async function handleGenerateMedia(tweet: GeneratedTweetRecord) {
+    if (!tweet.media_plan?.media_type || tweet.media_plan.media_type === 'none') {
+      return;
+    }
+
+    setMediaLoadingById((previous) => ({ ...previous, [tweet.id]: true }));
+    setError(null);
+
+    try {
+      const response = await fetch('/api/media/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          draft: tweet.content,
+          mediaType: tweet.media_plan.media_type,
+          mediaReason: tweet.media_plan.media_reason,
+          assetBrief: tweet.media_plan.asset_brief,
+          searchQuery: tweet.media_plan.search_query,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to generate media.');
+      }
+
+      setMediaPreviewById((previous) => ({ ...previous, [tweet.id]: data.imageDataUrl }));
+    } catch (mediaError) {
+      setError(mediaError instanceof Error ? mediaError.message : 'Failed to generate media.');
+    } finally {
+      setMediaLoadingById((previous) => ({ ...previous, [tweet.id]: false }));
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#050505] text-zinc-100">
@@ -487,6 +541,8 @@ export default function ReviewDashboard() {
                           : 'Quote post'}
                       </span>
                     ) : null}
+                    {getPostFormatLabel(tweet.post_format) ? <span>{getPostFormatLabel(tweet.post_format)}</span> : null}
+                    {tweet.community_label ? <span>{tweet.community_label}</span> : null}
                     {tweet.pillar_label ? <span>{tweet.pillar_label}</span> : null}
                     {tweet.post_archetype ? (
                       <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">
@@ -591,6 +647,30 @@ export default function ReviewDashboard() {
                         <p className="mt-2 text-xs font-mono leading-relaxed text-zinc-600">
                           Search: {String(tweet.media_plan.search_query)}
                         </p>
+                      ) : null}
+                      {['image', 'screenshot', 'chart'].includes(String(tweet.media_plan.media_type)) ? (
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleGenerateMedia(tweet)}
+                            disabled={mediaLoadingById[tweet.id]}
+                            className="rounded-full border border-zinc-700 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-500 disabled:opacity-50"
+                          >
+                            {mediaLoadingById[tweet.id] ? 'Generating image...' : 'Generate image preview'}
+                          </button>
+                        </div>
+                      ) : null}
+                      {mediaPreviewById[tweet.id] ? (
+                        <div className="mt-4">
+                          <Image
+                            src={mediaPreviewById[tweet.id]}
+                            alt="Generated supporting media preview"
+                            width={1024}
+                            height={1024}
+                            unoptimized
+                            className="w-full max-w-md rounded-xl border border-zinc-800"
+                          />
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -710,6 +790,8 @@ export default function ReviewDashboard() {
                               : 'Quote post'}
                           </span>
                         ) : null}
+                        {getPostFormatLabel(tweet.post_format) ? <span>{getPostFormatLabel(tweet.post_format)}</span> : null}
+                        {tweet.community_label ? <span>{tweet.community_label}</span> : null}
                         {tweet.pillar_label ? <span>{tweet.pillar_label}</span> : null}
                         {tweet.post_archetype ? (
                           <span className="rounded-full border border-zinc-700 px-2 py-1 uppercase tracking-[0.12em]">

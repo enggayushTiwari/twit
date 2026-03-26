@@ -1,9 +1,10 @@
-import type { PostArchetype, SurfaceIntent } from "./self-model";
+import type { PostArchetype, PostFormat, SurfaceIntent } from "./self-model";
 import type { GeneratedTweetMode } from "./startup";
 import type { DiscoveryTopicId } from "./discovery-config";
 
 export type RecentGeneratedPost = {
   post_archetype?: PostArchetype | null;
+  post_format?: PostFormat | null;
   surface_intent?: SurfaceIntent | null;
   created_at?: string;
 };
@@ -85,13 +86,19 @@ export function choosePostPlan(params: {
   const daypart = getDaypartBucket(now);
   const recent = params.recentPosts.slice(0, 20);
   const recentArchetypes = recent.map((post) => post.post_archetype).filter(Boolean) as PostArchetype[];
+  const recentFormats = recent.map((post) => post.post_format).filter(Boolean) as PostFormat[];
   const recentCounts = new Map<PostArchetype, number>();
+  const recentFormatCounts = new Map<PostFormat, number>();
 
   for (const archetype of recentArchetypes) {
     recentCounts.set(archetype, (recentCounts.get(archetype) || 0) + 1);
   }
+  for (const format of recentFormats) {
+    recentFormatCounts.set(format, (recentFormatCounts.get(format) || 0) + 1);
+  }
 
   const lastArchetype = recentArchetypes[0] || null;
+  const lastFormat = recentFormats[0] || null;
   const lastSurface =
     recent.map((post) => post.surface_intent).filter(Boolean)[0] || null;
   const recentTrendCount = recentArchetypes.slice(0, 4).filter((item) => item === "trend_reaction").length;
@@ -113,6 +120,8 @@ export function choosePostPlan(params: {
     .map((archetype) => {
       const count = recentCounts.get(archetype) || 0;
       const surfaceIntent = getSurfaceIntentForArchetype(archetype);
+      const postFormat = getPostFormatForArchetype(archetype, params.mode);
+      const formatCount = recentFormatCounts.get(postFormat) || 0;
       let score = 10 - count * 2;
 
       if (preferred.has(archetype)) {
@@ -126,12 +135,16 @@ export function choosePostPlan(params: {
       if (surfaceIntent === lastSurface) {
         score -= 1.5;
       }
+      score -= formatCount * 1.5;
+      if (postFormat === lastFormat) {
+        score -= 2;
+      }
 
       if (params.mode !== "general" && archetype === "build_update") {
         score += 1;
       }
 
-      return { archetype, surfaceIntent, score };
+      return { archetype, surfaceIntent, postFormat, score };
     })
     .sort((left, right) => right.score - left.score || left.archetype.localeCompare(right.archetype));
 
@@ -140,8 +153,31 @@ export function choosePostPlan(params: {
   return {
     archetype: selected?.archetype || getAllowedArchetypes(params.mode)[0],
     surfaceIntent: selected?.surfaceIntent || "feed_post",
+    postFormat:
+      selected?.postFormat ||
+      getPostFormatForArchetype(getAllowedArchetypes(params.mode)[0], params.mode),
     daypart,
   };
+}
+
+export function getPostFormatForArchetype(
+  archetype: PostArchetype,
+  mode: GeneratedTweetMode
+): PostFormat {
+  if (archetype === "question") {
+    return "question";
+  }
+  if (mode !== "general" && ["build_update", "customer_insight", "objection_handling"].includes(archetype)) {
+    return "build_update";
+  }
+  if (["disagree_cleanly", "add_specific_example", "extend_with_framework", "customer_pain_bridge", "proof_backed_response", "light_witty_response"].includes(archetype)) {
+    return "reply_style";
+  }
+  if (["hard_statement", "counterintuitive_take", "light_humor"].includes(archetype)) {
+    return "one_liner";
+  }
+
+  return "multi_line_insight";
 }
 
 export function recommendTopicArchetype(params: {

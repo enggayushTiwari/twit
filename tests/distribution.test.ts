@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chooseConversationArchetype,
+  chooseCommunityPostArchetype,
   getDefaultNarrativePillars,
   inferPillarLabel,
   isXEligibleClassification,
+  slugifyCommunityName,
 } from '../utils/distribution.ts';
 
 test('private thoughts are excluded from X-eligible generation', () => {
@@ -42,4 +44,17 @@ test('chooseConversationArchetype prefers clean disagreement for disagreement-sh
   });
 
   assert.equal(archetype, 'disagree_cleanly');
+});
+
+test('slugifyCommunityName normalizes community names into stable slugs', () => {
+  assert.equal(slugifyCommunityName('Techstars NYC Builders'), 'techstars-nyc-builders');
+});
+
+test('chooseCommunityPostArchetype prefers proof-backed posts when proof signals are present', () => {
+  const archetype = chooseCommunityPostArchetype({
+    contentHints: ['AI founders', 'proof', 'usage data', 'operator examples'],
+    recentArchetypes: ['add_specific_example'],
+  });
+
+  assert.equal(archetype, 'proof_backed_response');
 });

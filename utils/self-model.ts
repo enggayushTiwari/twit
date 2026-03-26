@@ -68,6 +68,14 @@ export const SURFACE_INTENTS = [
   "thread_opener",
 ] as const;
 
+export const POST_FORMATS = [
+  "one_liner",
+  "question",
+  "multi_line_insight",
+  "build_update",
+  "reply_style",
+] as const;
+
 export const MEDIA_TYPES = [
   "none",
   "gif",
@@ -86,6 +94,7 @@ export type FeedbackTag = (typeof FEEDBACK_TAG_OPTIONS)[number];
 export type EventReflectionStatus = (typeof EVENT_REFLECTION_STATUSES)[number];
 export type PostArchetype = (typeof POST_ARCHETYPES)[number];
 export type SurfaceIntent = (typeof SURFACE_INTENTS)[number];
+export type PostFormat = (typeof POST_FORMATS)[number];
 export type MediaType = (typeof MEDIA_TYPES)[number];
 export type SourceMemoryScope = (typeof SOURCE_MEMORY_SCOPES)[number];
 export type ReflectionFormat = "open" | "pairwise";
@@ -160,6 +169,7 @@ export type MediaPlan = {
   asset_brief: string;
   search_query: string;
   confidence: number;
+  generated_image_prompt?: string;
 };
 
 export type GeneratedTweetRecord = {
@@ -169,8 +179,11 @@ export type GeneratedTweetRecord = {
   created_at: string;
   generation_mode?: "general" | "build" | "startup";
   draft_kind?: "original_post" | "reply" | "quote_post";
+  post_format?: PostFormat | null;
   pillar_label?: string | null;
   source_conversation_id?: string | null;
+  community_profile_id?: string | null;
+  community_label?: string | null;
   theses?: string[] | null;
   alternates?: TweetAlternate[] | null;
   rationale?: string | null;

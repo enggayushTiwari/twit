@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateBuildTweetDraft, generateConversationDraft } from '@/utils/generation-runner';
+import {
+  generateBuildTweetDraft,
+  generateCommunityOriginalDraft,
+  generateConversationDraft,
+} from '@/utils/generation-runner';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +12,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const draftKind = body?.draftKind as 'original_post' | 'reply' | 'quote_post' | undefined;
     const conversationOpportunityId = body?.conversationOpportunityId as string | undefined;
+    const communityProfileId = body?.communityProfileId as string | undefined;
 
     if (draftKind === 'reply' || draftKind === 'quote_post') {
       if (!conversationOpportunityId) {
@@ -22,6 +27,11 @@ export async function POST(request: NextRequest) {
         conversationOpportunityId,
       });
 
+      return NextResponse.json(result, { status: result.success ? 200 : 400 });
+    }
+
+    if (draftKind === 'original_post' && communityProfileId) {
+      const result = await generateCommunityOriginalDraft({ communityProfileId });
       return NextResponse.json(result, { status: result.success ? 200 : 400 });
     }
 

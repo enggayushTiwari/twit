@@ -8,11 +8,14 @@ import { parseJsonResponse } from '@/utils/ai-json';
 import {
   getDefaultNarrativePillars,
   isConversationRecommendedAction,
+  isCommunityAudienceFocus,
   isOutcomeKind,
   isProofAssetKind,
   normalizeStringList,
+  slugifyCommunityName,
   summarizeOutcomeSignals,
   type CompanyImageProfile,
+  type CommunityProfile,
   type ConversationOpportunity,
   type ConversationSourceType,
   type DistributionOutcome,
@@ -35,6 +38,10 @@ const supabase = createClient(
 );
 
 type CompanyImageProfileRow = CompanyImageProfile;
+type CommunityProfileRow = Omit<CommunityProfile, 'common_topics' | 'preferred_post_shapes'> & {
+  common_topics: string[] | null;
+  preferred_post_shapes: string[] | null;
+};
 type NarrativePillarRow = NarrativePillar;
 type ProofAssetRow = ProofAsset;
 type TargetAccountRow = TargetAccount;
@@ -62,6 +69,14 @@ function mapConversationOpportunity(row: ConversationOpportunityRow): Conversati
   return {
     ...row,
     topic_tags: normalizeStringList(row.topic_tags),
+  };
+}
+
+function mapCommunityProfile(row: CommunityProfileRow): CommunityProfile {
+  return {
+    ...row,
+    common_topics: normalizeStringList(row.common_topics),
+    preferred_post_shapes: normalizeStringList(row.preferred_post_shapes),
   };
 }
 
@@ -195,7 +210,16 @@ export async function getDistributionWorkspace() {
   try {
     await ensureDefaultPillars();
 
-    const [profile, pillarsResult, proofResult, targetResult, conversationResult, draftResult, outcomeResult] =
+    const [
+      profile,
+      pillarsResult,
+      proofResult,
+      targetResult,
+      communityResult,
+      conversationResult,
+      draftResult,
+      outcomeResult,
+    ] =
       await Promise.all([
         ensureCompanyImageProfileRow(),
         supabase
@@ -214,16 +238,23 @@ export async function getDistributionWorkspace() {
           .order('priority', { ascending: false })
           .order('created_at', { ascending: false }),
         supabase
+          .from('community_profiles')
+          .select(
+            'id, name, slug, description, audience_focus, tone_rules, common_topics, preferred_post_shapes, taboo_patterns, why_you_belong, active, created_at, updated_at'
+          )
+          .order('active', { ascending: false })
+          .order('updated_at', { ascending: false }),
+        supabase
           .from('conversation_opportunities')
           .select(
-            'id, source_type, source_url, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
+            'id, source_type, source_url, community_profile_id, community_label, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
           )
           .order('created_at', { ascending: false })
           .limit(24),
         supabase
           .from('generated_tweets')
           .select(
-            'id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, post_archetype, surface_intent, created_at'
+            'id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, community_profile_id, community_label, post_archetype, surface_intent, created_at'
           )
           .in('draft_kind', ['reply', 'quote_post', 'original_post'])
           .order('created_at', { ascending: false })
@@ -244,6 +275,9 @@ export async function getDistributionWorkspace() {
         pillars: (pillarsResult.data || []) as NarrativePillarRow[],
         proofAssets: (proofResult.data || []) as ProofAssetRow[],
         targetAccounts: (targetResult.data || []) as TargetAccountRow[],
+        communityProfiles: ((communityResult.data || []) as CommunityProfileRow[]).map(
+          mapCommunityProfile
+        ),
         conversationOpportunities: ((conversationResult.data || []) as ConversationOpportunityRow[]).map(
           mapConversationOpportunity
         ),
@@ -256,6 +290,89 @@ export async function getDistributionWorkspace() {
     return {
       success: false,
       error: getErrorMessage(error, 'Failed to load distribution workspace.'),
+    };
+  }
+}
+
+export async function saveCommunityProfile(input: {
+  id?: string;
+  name: string;
+  description: string;
+  audienceFocus: string;
+  toneRules: string;
+  commonTopics?: string;
+  preferredPostShapes?: string;
+  tabooPatterns: string;
+  whyYouBelong: string;
+  active?: boolean;
+}) {
+  try {
+    const name = input.name.trim();
+    if (!name) {
+      return { success: false, error: 'Community name is required.' };
+    }
+
+    const payload = {
+      name,
+      slug: slugifyCommunityName(name),
+      description: input.description.trim(),
+      audience_focus: isCommunityAudienceFocus(input.audienceFocus)
+        ? input.audienceFocus
+        : 'mixed',
+      tone_rules: input.toneRules.trim(),
+      common_topics: input.commonTopics
+        ? input.commonTopics
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : [],
+      preferred_post_shapes: input.preferredPostShapes
+        ? input.preferredPostShapes
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : [],
+      taboo_patterns: input.tabooPatterns.trim(),
+      why_you_belong: input.whyYouBelong.trim(),
+      active: input.active ?? true,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (input.id) {
+      const { error } = await supabase.from('community_profiles').update(payload).eq('id', input.id);
+      if (error) {
+        return { success: false, error: 'Failed to update community profile.' };
+      }
+    } else {
+      const { error } = await supabase.from('community_profiles').insert([payload]);
+      if (error) {
+        return { success: false, error: 'Failed to save community profile.' };
+      }
+    }
+
+    revalidatePath('/distribution');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to save community profile.'),
+    };
+  }
+}
+
+export async function deleteCommunityProfile(id: string) {
+  try {
+    const { error } = await supabase.from('community_profiles').delete().eq('id', id);
+    if (error) {
+      return { success: false, error: 'Failed to delete community profile.' };
+    }
+
+    revalidatePath('/distribution');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to delete community profile.'),
     };
   }
 }
@@ -463,6 +580,7 @@ export async function deleteTargetAccount(id: string) {
 export async function importConversationOpportunities(input: {
   sourceUrl?: string;
   pastedText?: string;
+  communityProfileId?: string;
 }) {
   try {
     const sourceUrl = input.sourceUrl?.trim() || '';
@@ -470,6 +588,21 @@ export async function importConversationOpportunities(input: {
 
     if (!sourceUrl && !pastedText) {
       return { success: false, error: 'Provide a URL or pasted conversation text.' };
+    }
+
+    let communityProfileId: string | null = input.communityProfileId?.trim() || null;
+    let communityLabel: string | null = null;
+    if (communityProfileId) {
+      const { data: communityRow } = await supabase
+        .from('community_profiles')
+        .select('id, name')
+        .eq('id', communityProfileId)
+        .maybeSingle();
+      if (!communityRow) {
+        communityProfileId = null;
+      } else {
+        communityLabel = communityRow.name;
+      }
     }
 
     let rawInput = pastedText;
@@ -504,6 +637,8 @@ export async function importConversationOpportunities(input: {
         items.map((item) => ({
           source_type: sourceType,
           source_url: sourceUrl || null,
+          community_profile_id: communityProfileId,
+          community_label: communityLabel,
           author_handle: item.author_handle || null,
           author_name: item.author_name || null,
           content: item.content,
@@ -515,7 +650,7 @@ export async function importConversationOpportunities(input: {
         }))
       )
       .select(
-        'id, source_type, source_url, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
+        'id, source_type, source_url, community_profile_id, community_label, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
       );
 
     if (error) {
@@ -549,6 +684,31 @@ export async function deleteConversationOpportunity(id: string) {
     return {
       success: false,
       error: getErrorMessage(error, 'Failed to delete conversation opportunity.'),
+    };
+  }
+}
+
+export async function updateConversationOpportunityStatus(input: {
+  id: string;
+  status: 'new' | 'used' | 'ignored' | 'saved_as_event';
+}) {
+  try {
+    const { error } = await supabase
+      .from('conversation_opportunities')
+      .update({ status: input.status })
+      .eq('id', input.id);
+
+    if (error) {
+      return { success: false, error: 'Failed to update conversation opportunity status.' };
+    }
+
+    revalidatePath('/distribution');
+    revalidatePath('/timeline');
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to update conversation opportunity status.'),
     };
   }
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { PenLine, BrainCircuit, Rocket, LayoutList, Database, TrendingUp } from 'lucide-react';
+import { PenLine, BrainCircuit, Rocket, LayoutList, Database, TrendingUp, Users } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -13,6 +13,7 @@ export default function Navigation() {
     { href: '/profile', label: 'Mind Model', icon: BrainCircuit },
     { href: '/build', label: 'Build', icon: Rocket },
     { href: '/distribution', label: 'Distribution', icon: TrendingUp },
+    { href: '/timeline', label: 'Timeline', icon: Users },
     { href: '/review', label: 'Review', icon: LayoutList },
   ];
 

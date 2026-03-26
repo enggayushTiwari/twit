@@ -3,6 +3,9 @@ import { GoogleGenAI } from '@google/genai';
 import {
   buildAuthenticityCriticPrompt,
   buildCandidateGenerationPrompt,
+  buildCommunityOriginalCandidatePrompt,
+  buildCommunityOriginalCriticPrompt,
+  buildCommunityOriginalGenerationSystemPrompt,
   buildConversationCandidatePrompt,
   buildConversationCriticPrompt,
   buildConversationGenerationSystemPrompt,
@@ -17,9 +20,11 @@ import { getErrorMessage } from './errors';
 import { parseJsonResponse } from './ai-json';
 import { GENERATION_MODEL } from './ai-config';
 import {
+  chooseCommunityPostArchetype,
   chooseConversationArchetype,
   inferPillarLabel,
   type CompanyImageProfile,
+  type CommunityProfile,
   type ConversationOpportunity,
   type DraftKind,
   type NarrativePillar,
@@ -31,6 +36,7 @@ import type {
   MediaPlan,
   MindModelEntry,
   PostArchetype,
+  PostFormat,
   RankedGenerationResult,
   SurfaceIntent,
   TweetAlternate,
@@ -77,6 +83,7 @@ type BuildMemoryMatch = {
 type RecentTweetRow = {
   content: string;
   post_archetype?: PostArchetype | null;
+  post_format?: PostFormat | null;
   surface_intent?: SurfaceIntent | null;
   created_at?: string;
 };
@@ -114,6 +121,7 @@ type DistributionSignalRow = {
   notes: string | null;
 };
 type ConversationOpportunityRow = ConversationOpportunity;
+type CommunityProfileRow = CommunityProfile | null;
 
 type EventReflectionQueryClient = {
   from: (table: 'event_reflections') => {
@@ -206,6 +214,64 @@ function normalizeRankedResult(rawRankedResult: RankedGenerationResult): RankedG
           .filter((item) => Number.isFinite(item.draft_index))
       : [],
   };
+}
+
+function looksIncompleteDraft(draft: string) {
+  const trimmed = draft.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  if (trimmed.endsWith(':') || trimmed.endsWith(';') || trimmed.endsWith(',')) {
+    return true;
+  }
+
+  if (/^us when\b/i.test(trimmed) && !/[.!?)]$/.test(trimmed)) {
+    return true;
+  }
+
+  const openParens = (trimmed.match(/\(/g) || []).length;
+  const closeParens = (trimmed.match(/\)/g) || []).length;
+  if (openParens !== closeParens) {
+    return true;
+  }
+
+  const lines = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lastLine = lines[lines.length - 1] || trimmed;
+  if (/\b(step|rule|lesson|us when)\b/i.test(lastLine) && !/[.!?)]$/.test(lastLine)) {
+    return true;
+  }
+
+  return false;
+}
+
+function pickBestUsableCandidate(
+  draftSet: GenerationDraftSet,
+  rankedCandidates: RankedCandidate[],
+  selectedIndex: number
+) {
+  const preferred = draftSet.candidates[selectedIndex];
+  if (preferred && !looksIncompleteDraft(preferred.draft)) {
+    return preferred;
+  }
+
+  const rankedUsable = rankedCandidates.find((candidate) => !looksIncompleteDraft(candidate.draft));
+  if (rankedUsable) {
+    return rankedUsable;
+  }
+
+  return draftSet.candidates.find((candidate) => !looksIncompleteDraft(candidate.draft)) || preferred || draftSet.candidates[0];
+}
+
+function shouldSkipMediaPlanning(archetype: PostArchetype, surfaceIntent: SurfaceIntent) {
+  if (surfaceIntent === 'media_supported') {
+    return false;
+  }
+
+  return ['question', 'hard_statement', 'counterintuitive_take', 'disagree_cleanly', 'add_specific_example', 'extend_with_framework', 'customer_pain_bridge', 'proof_backed_response'].includes(archetype);
 }
 
 function buildContextIdeas(seedIdea: string, relatedIdeas: IdeaMatch[] | null) {
@@ -378,6 +444,16 @@ async function planMediaForDraft(params: {
   archetype: PostArchetype;
   surfaceIntent: SurfaceIntent;
 }) {
+  if (shouldSkipMediaPlanning(params.archetype, params.surfaceIntent)) {
+    return normalizeMediaPlan({
+      media_type: 'none',
+      media_reason: 'Text-first archetype. Media would likely slow the workflow more than help the post.',
+      asset_brief: '',
+      search_query: '',
+      confidence: 0,
+    });
+  }
+
   const response = await params.ai.models.generateContent({
     model: GENERATION_MODEL,
     contents: buildMediaPlanPrompt({
@@ -486,7 +562,7 @@ export async function generateGeneralTweetDraft() {
 
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
-      .select('content, post_archetype, surface_intent, created_at')
+      .select('content, post_archetype, post_format, surface_intent, created_at')
       .eq('generation_mode', 'general')
       .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
       .order('created_at', { ascending: false })
@@ -527,6 +603,7 @@ export async function generateGeneralTweetDraft() {
         seedIdea: seedIdea.content,
         targetArchetype: postPlan.archetype,
         surfaceIntent: postPlan.surfaceIntent,
+        postFormat: postPlan.postFormat,
         liveTopicTitle: liveTopicContext?.title || null,
       }),
       config: {
@@ -568,10 +645,11 @@ export async function generateGeneralTweetDraft() {
     );
 
     const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
-    const selectedCandidate =
-      draftSet.candidates[rankedResult.selected_index] ||
-      rankedCandidates[0] ||
-      draftSet.candidates[0];
+    const selectedCandidate = pickBestUsableCandidate(
+      draftSet,
+      rankedCandidates,
+      rankedResult.selected_index
+    );
 
     if (!selectedCandidate) {
       throw new Error('No selected draft could be determined.');
@@ -607,6 +685,7 @@ export async function generateGeneralTweetDraft() {
           status: 'PENDING',
           generation_mode: 'general',
           draft_kind: 'original_post',
+          post_format: postPlan.postFormat,
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
@@ -624,7 +703,7 @@ export async function generateGeneralTweetDraft() {
           source_conversation_id: null,
         },
       ])
-      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .select('id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -698,7 +777,7 @@ export async function generateBuildTweetDraft() {
 
     const { data: recentTweets } = await supabase
       .from('generated_tweets')
-      .select('content, post_archetype, surface_intent, created_at')
+      .select('content, post_archetype, post_format, surface_intent, created_at')
       .in('generation_mode', ['build', 'startup'])
       .in('status', ['APPROVED', 'OPENED_IN_X', 'PUBLISHED', 'PENDING'])
       .order('created_at', { ascending: false })
@@ -741,6 +820,7 @@ export async function generateBuildTweetDraft() {
         seedIdea: seedEntry.content,
         targetArchetype: postPlan.archetype,
         surfaceIntent: postPlan.surfaceIntent,
+        postFormat: postPlan.postFormat,
         liveTopicTitle: liveTopicContext?.title || null,
       }),
       config: {
@@ -782,10 +862,11 @@ export async function generateBuildTweetDraft() {
     );
 
     const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
-    const selectedCandidate =
-      draftSet.candidates[rankedResult.selected_index] ||
-      rankedCandidates[0] ||
-      draftSet.candidates[0];
+    const selectedCandidate = pickBestUsableCandidate(
+      draftSet,
+      rankedCandidates,
+      rankedResult.selected_index
+    );
 
     if (!selectedCandidate) {
       throw new Error('No startup draft could be selected.');
@@ -821,6 +902,7 @@ export async function generateBuildTweetDraft() {
           status: 'PENDING',
           generation_mode: 'build',
           draft_kind: 'original_post',
+          post_format: postPlan.postFormat,
           theses: draftSet.theses,
           alternates,
           rationale: rationaleParts.join('\n\n'),
@@ -838,7 +920,7 @@ export async function generateBuildTweetDraft() {
           source_conversation_id: null,
         },
       ])
-      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .select('id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -866,7 +948,7 @@ export async function generateConversationDraft(params: {
         supabase
           .from('conversation_opportunities')
           .select(
-            'id, source_type, source_url, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
+            'id, source_type, source_url, community_profile_id, community_label, author_handle, author_name, content, topic_tags, why_it_matters, recommended_action, status, raw_input, created_at'
           )
           .eq('id', params.conversationOpportunityId)
           .maybeSingle(),
@@ -881,7 +963,7 @@ export async function generateConversationDraft(params: {
           .limit(18),
         supabase
           .from('generated_tweets')
-          .select('content, post_archetype, surface_intent, created_at')
+          .select('content, post_archetype, post_format, surface_intent, created_at')
           .eq('generation_mode', 'build')
           .in('draft_kind', ['reply', 'quote_post'])
           .order('created_at', { ascending: false })
@@ -899,6 +981,18 @@ export async function generateConversationDraft(params: {
       throw new Error('Conversation opportunity not found.');
     }
 
+    const communityProfile = conversationRow.community_profile_id
+      ? (
+          await supabase
+            .from('community_profiles')
+            .select(
+              'id, name, slug, description, audience_focus, tone_rules, common_topics, preferred_post_shapes, taboo_patterns, why_you_belong, active, created_at, updated_at'
+            )
+            .eq('id', conversationRow.community_profile_id)
+            .maybeSingle()
+        ).data
+      : null;
+
     const targetArchetype = chooseConversationArchetype({
       draftKind: params.draftKind,
       recommendedAction: conversationRow.recommended_action,
@@ -913,6 +1007,8 @@ export async function generateConversationDraft(params: {
         : conversationRow.recommended_action === 'quote'
         ? 'news_reaction'
         : 'feed_post';
+    const postFormat: PostFormat =
+      params.draftKind === 'reply' ? 'reply_style' : targetArchetype === 'question' ? 'question' : 'multi_line_insight';
 
     const buildContext =
       ((buildRows || []) as Array<{ kind: string; content: string }>)
@@ -939,6 +1035,7 @@ export async function generateConversationDraft(params: {
       draftKind: params.draftKind,
       conversationContext,
       companyImageProfile: distributionContext.companyImageProfile,
+      communityProfile: (communityProfile || null) as CommunityProfileRow,
       narrativePillars: distributionContext.narrativePillars,
       proofAssets: distributionContext.proofAssets,
       sharedMindModel: ((worldviewRows || []) as MindModelEntry[]) || [],
@@ -955,6 +1052,7 @@ export async function generateConversationDraft(params: {
         draftKind: params.draftKind,
         targetArchetype,
         surfaceIntent,
+        postFormat,
         conversationText: conversationContext,
       }),
       config: {
@@ -997,10 +1095,11 @@ export async function generateConversationDraft(params: {
     );
 
     const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
-    const selectedCandidate =
-      draftSet.candidates[rankedResult.selected_index] ||
-      rankedCandidates[0] ||
-      draftSet.candidates[0];
+    const selectedCandidate = pickBestUsableCandidate(
+      draftSet,
+      rankedCandidates,
+      rankedResult.selected_index
+    );
 
     if (!selectedCandidate) {
       throw new Error('No conversation draft could be selected.');
@@ -1032,11 +1131,16 @@ export async function generateConversationDraft(params: {
           status: 'PENDING',
           generation_mode: 'build',
           draft_kind: params.draftKind,
+          post_format: postFormat,
           pillar_label: inferPillarLabel({
             content: conversationRow.content,
             availablePillars: distributionContext.narrativePillars,
           }),
           source_conversation_id: conversationRow.id,
+          community_profile_id: conversationRow.community_profile_id,
+          community_label:
+            conversationRow.community_label ||
+            ((communityProfile as CommunityProfile | null)?.name || null),
           theses: draftSet.theses,
           alternates,
           rationale: [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || '']
@@ -1048,7 +1152,7 @@ export async function generateConversationDraft(params: {
           source_memory_scope: 'mixed',
         },
       ])
-      .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+      .select('id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
       .single();
 
     if (insertError || !insertedTweet) {
@@ -1060,6 +1164,212 @@ export async function generateConversationDraft(params: {
     return {
       success: false as const,
       error: getErrorMessage(error, 'An unexpected conversation generation error occurred.'),
+    };
+  }
+}
+
+export async function generateCommunityOriginalDraft(params: { communityProfileId: string }) {
+  try {
+    const { ai, supabase } = createClients();
+
+    const [
+      { data: communityProfile },
+      { data: worldviewRows },
+      { data: buildRows },
+      { data: recentTweets },
+      distributionContext,
+    ] = await Promise.all([
+      supabase
+        .from('community_profiles')
+        .select(
+          'id, name, slug, description, audience_focus, tone_rules, common_topics, preferred_post_shapes, taboo_patterns, why_you_belong, active, created_at, updated_at'
+        )
+        .eq('id', params.communityProfileId)
+        .maybeSingle(),
+      supabase
+        .from('mind_model_entries')
+        .select(
+          'id, kind, statement, status, confidence, priority, source_type, source_ref_id, tags, evidence_summary, created_at, updated_at'
+        )
+        .eq('status', 'confirmed')
+        .in('kind', ['belief', 'lens', 'taste_like', 'taste_avoid', 'voice_rule'])
+        .order('priority', { ascending: false })
+        .limit(18),
+      supabase
+        .from('build_memory_entries')
+        .select('kind, content')
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('generated_tweets')
+        .select('content, post_archetype, post_format, surface_intent, created_at')
+        .eq('community_profile_id', params.communityProfileId)
+        .order('created_at', { ascending: false })
+        .limit(10),
+      getDistributionContext(supabase),
+    ]);
+
+    const community = (communityProfile || null) as CommunityProfileRow;
+    if (!community) {
+      throw new Error('Community profile not found.');
+    }
+
+    const targetArchetype = chooseCommunityPostArchetype({
+      contentHints: [
+        community.description,
+        community.tone_rules,
+        ...(community.common_topics || []),
+        ...(community.preferred_post_shapes || []),
+      ],
+      recentArchetypes: ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.post_archetype),
+    });
+    const surfaceIntent: SurfaceIntent = 'conversation_starter';
+    const postFormat: PostFormat =
+      targetArchetype === 'question'
+        ? 'question'
+        : targetArchetype === 'build_update'
+        ? 'build_update'
+        : ['add_specific_example', 'extend_with_framework', 'proof_backed_response'].includes(
+            targetArchetype
+          )
+        ? 'reply_style'
+        : 'one_liner';
+    const buildContext =
+      ((buildRows || []) as Array<{ kind: string; content: string }>)
+        .map((row) => `[${row.kind}] ${row.content}`)
+        .join('\n') || 'None';
+
+    const systemPrompt = buildCommunityOriginalGenerationSystemPrompt({
+      communityProfile: community,
+      companyImageProfile: distributionContext.companyImageProfile,
+      narrativePillars: distributionContext.narrativePillars,
+      proofAssets: distributionContext.proofAssets,
+      sharedMindModel: ((worldviewRows || []) as MindModelEntry[]) || [],
+      buildContext,
+      recentDistributionDrafts:
+        ((recentTweets || []) as RecentTweetRow[]).map((tweet) => tweet.content).join('\n') ||
+        'None',
+      distributionSignals: distributionContext.distributionSignals,
+    });
+
+    const generationResponse = await ai.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: buildCommunityOriginalCandidatePrompt({
+        communityName: community.name,
+        topicHints: [...community.common_topics, ...community.preferred_post_shapes].slice(0, 8),
+        targetArchetype,
+        surfaceIntent,
+        postFormat,
+      }),
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.8,
+      },
+    });
+
+    const draftSet = normalizeDraftSet(
+      parseJsonResponse<GenerationDraftSet>(
+        generationResponse.text || '',
+        'Community generation returned invalid structured output'
+      )
+    );
+
+    if (draftSet.candidates.length === 0) {
+      throw new Error('Community generation returned no usable candidates.');
+    }
+
+    const criticResponse = await ai.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: buildCommunityOriginalCriticPrompt({
+        candidatesJson: JSON.stringify(draftSet, null, 2),
+        communityName: community.name,
+        targetArchetype,
+        surfaceIntent,
+      }),
+      config: {
+        systemInstruction:
+          'You are a strict community-fit evaluator. Return JSON only and never add prose outside the schema.',
+        temperature: 0.2,
+      },
+    });
+
+    const rankedResult = normalizeRankedResult(
+      parseJsonResponse<RankedGenerationResult>(
+        criticResponse.text || '',
+        'Community critic returned invalid structured output'
+      )
+    );
+
+    const rankedCandidates = buildRankedCandidates(draftSet.candidates, rankedResult);
+    const selectedCandidate = pickBestUsableCandidate(
+      draftSet,
+      rankedCandidates,
+      rankedResult.selected_index
+    );
+
+    if (!selectedCandidate) {
+      throw new Error('No community draft could be selected.');
+    }
+
+    const selectedRanking =
+      rankedCandidates.find((candidate) => candidate.draft === selectedCandidate.draft) || null;
+    const alternates: TweetAlternate[] = rankedCandidates
+      .filter((candidate) => candidate.draft !== selectedCandidate.draft)
+      .slice(0, 2)
+      .map((candidate) => ({
+        draft: candidate.draft,
+        thesis: candidate.thesis,
+        why_it_fits: candidate.why_it_fits,
+        score: candidate.score,
+      }));
+    const mediaPlan = await planMediaForDraft({
+      ai,
+      draft: selectedCandidate.draft,
+      archetype: targetArchetype,
+      surfaceIntent,
+    });
+
+    const { data: insertedTweet, error: insertError } = await supabase
+      .from('generated_tweets')
+      .insert([
+        {
+          content: selectedCandidate.draft,
+          status: 'PENDING',
+          generation_mode: 'build',
+          draft_kind: 'original_post',
+          post_format: postFormat,
+          pillar_label: inferPillarLabel({
+            content: `${community.description} ${community.common_topics.join(' ')}`,
+            availablePillars: distributionContext.narrativePillars,
+          }),
+          source_conversation_id: null,
+          community_profile_id: community.id,
+          community_label: community.name,
+          theses: draftSet.theses,
+          alternates,
+          rationale: [selectedCandidate.why_it_fits, selectedRanking?.critiqueReason || '']
+            .filter(Boolean)
+            .join('\n\n'),
+          post_archetype: targetArchetype,
+          surface_intent: surfaceIntent,
+          media_plan: mediaPlan,
+          source_memory_scope: 'build',
+        },
+      ])
+      .select(
+        'id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, community_profile_id, community_label, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope'
+      )
+      .single();
+
+    if (insertError || !insertedTweet) {
+      throw new Error('Failed to save the community draft.');
+    }
+
+    return { success: true as const, tweet: insertedTweet };
+  } catch (error) {
+    return {
+      success: false as const,
+      error: getErrorMessage(error, 'An unexpected community generation error occurred.'),
     };
   }
 }

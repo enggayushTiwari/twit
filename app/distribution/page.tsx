@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
+  deleteCommunityProfile,
   deleteConversationOpportunity,
   deleteNarrativePillar,
   deleteProofAsset,
   deleteTargetAccount,
   getDistributionWorkspace,
   importConversationOpportunities,
+  saveCommunityProfile,
   saveDistributionOutcome,
   saveNarrativePillar,
   saveProofAsset,
@@ -15,10 +17,13 @@ import {
   updateCompanyImageProfile,
 } from './actions';
 import {
+  getCommunityAudienceLabel,
   getConversationActionLabel,
   getDraftKindLabel,
   getProofAssetKindLabel,
   type CompanyImageProfile,
+  type CommunityAudienceFocus,
+  type CommunityProfile,
   type ConversationOpportunity,
   type DistributionOutcome,
   type NarrativePillar,
@@ -34,6 +39,7 @@ import {
   Sparkles,
   Trash2,
   TrendingUp,
+  Users,
 } from 'lucide-react';
 
 type DistributionDraftRecord = {
@@ -44,6 +50,8 @@ type DistributionDraftRecord = {
   draft_kind?: 'original_post' | 'reply' | 'quote_post';
   pillar_label?: string | null;
   source_conversation_id?: string | null;
+  community_profile_id?: string | null;
+  community_label?: string | null;
   post_archetype?: string | null;
   surface_intent?: string | null;
   created_at: string;
@@ -103,6 +111,7 @@ export default function DistributionPage() {
   const [pillars, setPillars] = useState<NarrativePillar[]>([]);
   const [proofAssets, setProofAssets] = useState<ProofAsset[]>([]);
   const [targetAccounts, setTargetAccounts] = useState<TargetAccount[]>([]);
+  const [communityProfiles, setCommunityProfiles] = useState<CommunityProfile[]>([]);
   const [conversationOpportunities, setConversationOpportunities] = useState<ConversationOpportunity[]>([]);
   const [recentDrafts, setRecentDrafts] = useState<DistributionDraftRecord[]>([]);
   const [recentOutcomes, setRecentOutcomes] = useState<DistributionOutcome[]>([]);
@@ -123,7 +132,21 @@ export default function DistributionPage() {
     priority: 2,
     monitoringNotes: '',
   });
-  const [conversationForm, setConversationForm] = useState({ sourceUrl: '', pastedText: '' });
+  const [communityForm, setCommunityForm] = useState({
+    name: '',
+    description: '',
+    audienceFocus: 'mixed' as CommunityAudienceFocus,
+    toneRules: '',
+    commonTopics: '',
+    preferredPostShapes: '',
+    tabooPatterns: '',
+    whyYouBelong: '',
+  });
+  const [conversationForm, setConversationForm] = useState({
+    sourceUrl: '',
+    pastedText: '',
+    communityProfileId: '',
+  });
   const [outcomeForms, setOutcomeForms] = useState<
     Record<string, { impressions: string; likes: string; replies: string; reposts: string; bookmarks: string; profileVisits: string; followsGained: string; linkClicks: string; notes: string }>
   >({});
@@ -151,6 +174,7 @@ export default function DistributionPage() {
     setPillars(result.data.pillars);
     setProofAssets(result.data.proofAssets);
     setTargetAccounts(result.data.targetAccounts);
+    setCommunityProfiles(result.data.communityProfiles || []);
     setConversationOpportunities(result.data.conversationOpportunities);
     setRecentDrafts(result.data.recentDrafts as DistributionDraftRecord[]);
     setRecentOutcomes(result.data.recentOutcomes);
@@ -260,6 +284,30 @@ export default function DistributionPage() {
     window.setTimeout(() => setToast(null), 2500);
   }
 
+  async function handleCommunitySave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    const result = await saveCommunityProfile(communityForm);
+    if (!result.success) {
+      setError(getActionError(result, 'Failed to save community profile.'));
+      return;
+    }
+
+    setCommunityForm({
+      name: '',
+      description: '',
+      audienceFocus: 'mixed',
+      toneRules: '',
+      commonTopics: '',
+      preferredPostShapes: '',
+      tabooPatterns: '',
+      whyYouBelong: '',
+    });
+    await refreshWorkspace();
+    setToast('Community profile saved.');
+    window.setTimeout(() => setToast(null), 2500);
+  }
+
   async function handleConversationImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setImportingConversation(true);
@@ -272,7 +320,7 @@ export default function DistributionPage() {
       return;
     }
 
-    setConversationForm({ sourceUrl: '', pastedText: '' });
+    setConversationForm({ sourceUrl: '', pastedText: '', communityProfileId: '' });
     await refreshWorkspace();
     setToast(result.message || 'Conversation opportunities imported.');
     window.setTimeout(() => setToast(null), 2800);
@@ -310,6 +358,39 @@ export default function DistributionPage() {
         generationError instanceof Error
           ? generationError.message
           : 'Failed to generate distribution draft.'
+      );
+    } finally {
+      setGeneratingForConversation(null);
+    }
+  }
+
+  async function handleGenerateCommunityPost(communityProfileId: string) {
+    setGeneratingForConversation(`community-${communityProfileId}`);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/distribution/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          draftKind: 'original_post',
+          communityProfileId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to generate community post.');
+      }
+
+      await refreshWorkspace();
+      setToast('Community-specific draft added to review.');
+      window.setTimeout(() => setToast(null), 2800);
+    } catch (generationError) {
+      setError(
+        generationError instanceof Error
+          ? generationError.message
+          : 'Failed to generate community post.'
       );
     } finally {
       setGeneratingForConversation(null);
@@ -522,6 +603,166 @@ export default function DistributionPage() {
           </section>
         </section>
 
+        <section className="rounded-3xl border border-zinc-900 bg-zinc-950/70 p-6">
+          <div>
+            <h2 className="text-xl font-semibold text-zinc-50">Community profiles</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Teach the system how to sound native inside focused communities like Techstars,
+              startup builders, or operator circles.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+            <form onSubmit={(event) => void handleCommunitySave(event)} className="space-y-3">
+              <input
+                value={communityForm.name}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({ ...previous, name: event.target.value }))
+                }
+                placeholder="Community name"
+                className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <textarea
+                value={communityForm.description}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    description: event.target.value,
+                  }))
+                }
+                placeholder="What kind of room is this?"
+                className="min-h-[84px] w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <select
+                value={communityForm.audienceFocus}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    audienceFocus: event.target.value as CommunityAudienceFocus,
+                  }))
+                }
+                className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              >
+                {(['builders', 'customers', 'mixed'] as const).map((focus) => (
+                  <option key={focus} value={focus}>
+                    {getCommunityAudienceLabel(focus)}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                value={communityForm.toneRules}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({ ...previous, toneRules: event.target.value }))
+                }
+                placeholder="Tone rules for this community"
+                className="min-h-[84px] w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <input
+                value={communityForm.commonTopics}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    commonTopics: event.target.value,
+                  }))
+                }
+                placeholder="Common topics, comma separated"
+                className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <input
+                value={communityForm.preferredPostShapes}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    preferredPostShapes: event.target.value,
+                  }))
+                }
+                placeholder="Preferred post shapes, comma separated"
+                className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <textarea
+                value={communityForm.tabooPatterns}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    tabooPatterns: event.target.value,
+                  }))
+                }
+                placeholder="What feels off or cringe here?"
+                className="min-h-[84px] w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <textarea
+                value={communityForm.whyYouBelong}
+                onChange={(event) =>
+                  setCommunityForm((previous) => ({
+                    ...previous,
+                    whyYouBelong: event.target.value,
+                  }))
+                }
+                placeholder="Why do you belong in this room?"
+                className="min-h-[84px] w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-500"
+              >
+                <Users className="w-4 h-4" />
+                Save community
+              </button>
+            </form>
+
+            <div className="space-y-3">
+              {communityProfiles.map((community) => (
+                <div key={community.id} className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100">{community.name}</div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
+                        {getCommunityAudienceLabel(community.audience_focus)}
+                      </div>
+                      {community.description ? (
+                        <div className="mt-2 text-sm text-zinc-400">{community.description}</div>
+                      ) : null}
+                      {community.common_topics.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {community.common_topics.map((topic) => (
+                            <span
+                              key={`${community.id}-${topic}`}
+                              className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-400"
+                            >
+                              {topic}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void deleteCommunityProfile(community.id).then(refreshWorkspace).catch(() => {})
+                      }
+                      className="text-zinc-500 transition-colors hover:text-red-300"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateCommunityPost(community.id)}
+                      disabled={generatingForConversation === `community-${community.id}`}
+                      className="rounded-full bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                      {generatingForConversation === `community-${community.id}`
+                        ? 'Generating...'
+                        : 'Draft community post'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-8 xl:grid-cols-[0.95fr_1.05fr]">
           <section className="rounded-3xl border border-zinc-900 bg-zinc-950/70 p-6">
             <div>
@@ -572,6 +813,14 @@ export default function DistributionPage() {
             </div>
 
             <form onSubmit={(event) => void handleConversationImport(event)} className="mt-5 space-y-3">
+              <select value={conversationForm.communityProfileId} onChange={(event) => setConversationForm((previous) => ({ ...previous, communityProfileId: event.target.value }))} className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600">
+                <option value="">No community context</option>
+                {communityProfiles.map((community) => (
+                  <option key={community.id} value={community.id}>
+                    {community.name}
+                  </option>
+                ))}
+              </select>
               <input value={conversationForm.sourceUrl} onChange={(event) => setConversationForm((previous) => ({ ...previous, sourceUrl: event.target.value }))} placeholder="Paste an X tweet/search/profile URL" className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600" />
               <textarea value={conversationForm.pastedText} onChange={(event) => setConversationForm((previous) => ({ ...previous, pastedText: event.target.value }))} placeholder="Or paste tweet text / thread text manually" className="min-h-[120px] w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600" />
               <button type="submit" disabled={importingConversation} className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-950 transition-opacity hover:opacity-90 disabled:opacity-60">
@@ -587,6 +836,7 @@ export default function DistributionPage() {
                     <span>{opportunity.source_type.replace(/_/g, ' ')}</span>
                     <span>·</span>
                     <span>{getConversationActionLabel(opportunity.recommended_action)}</span>
+                    {opportunity.community_label ? (<><span>Â·</span><span>{opportunity.community_label}</span></>) : null}
                     {opportunity.author_handle ? (<><span>·</span><span>@{opportunity.author_handle}</span></>) : null}
                   </div>
                   <p className="mt-3 text-sm leading-relaxed text-zinc-200">{opportunity.content}</p>

@@ -31,6 +31,7 @@ import {
     type MindModelKind,
     type MindModelStatus,
     type PostArchetype,
+    type PostFormat,
     type ReflectionMetadata,
     type ReflectionMode,
     type ReflectionTurn,
@@ -83,8 +84,11 @@ type GeneratedTweetRow = {
     status: string;
     generation_mode: GeneratedTweetMode;
     draft_kind?: 'original_post' | 'reply' | 'quote_post';
+    post_format?: PostFormat | null;
     pillar_label?: string | null;
     source_conversation_id?: string | null;
+    community_profile_id?: string | null;
+    community_label?: string | null;
     theses: string[] | null;
     alternates:
         | Array<{
@@ -953,7 +957,7 @@ export async function getPendingTweets(mode: GeneratedTweetMode = 'general') {
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+            .select('id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, community_profile_id, community_label, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .eq('status', 'PENDING')
             .order('created_at', { ascending: false });
 
@@ -1143,7 +1147,7 @@ export async function getTweetHistory(mode: GeneratedTweetMode | 'all' = 'all') 
     try {
         let query = supabase
             .from('generated_tweets')
-            .select('id, content, status, generation_mode, draft_kind, pillar_label, source_conversation_id, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
+            .select('id, content, status, generation_mode, draft_kind, post_format, pillar_label, source_conversation_id, community_profile_id, community_label, theses, alternates, rationale, created_at, post_archetype, surface_intent, media_plan, source_memory_scope')
             .neq('status', 'PENDING')
             .order('created_at', { ascending: false });
 

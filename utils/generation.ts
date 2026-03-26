@@ -2,11 +2,13 @@ import type {
   MediaPlan,
   MindModelEntry,
   PostArchetype,
+  PostFormat,
   SurfaceIntent,
 } from "./self-model";
 import type { StartupProfile } from "./startup";
 import type {
   CompanyImageProfile,
+  CommunityProfile,
   DraftKind,
   NarrativePillar,
   ProofAsset,
@@ -42,6 +44,7 @@ type BuildCandidatePromptParams = {
   seedIdea: string;
   targetArchetype: PostArchetype;
   surfaceIntent: SurfaceIntent;
+  postFormat?: PostFormat;
   thesisCount?: number;
   draftCount?: number;
   liveTopicTitle?: string | null;
@@ -126,6 +129,23 @@ function formatProofAssets(proofAssets: ProofAsset[] | undefined) {
     .join("\n");
 }
 
+function formatCommunityProfile(profile: CommunityProfile | null | undefined) {
+  if (!profile) {
+    return "None";
+  }
+
+  return [
+    `Community: ${profile.name}`,
+    `Audience focus: ${profile.audience_focus}`,
+    `Description: ${profile.description || "Not set"}`,
+    `Tone rules: ${profile.tone_rules || "Not set"}`,
+    `Common topics: ${profile.common_topics.join(", ") || "Not set"}`,
+    `Preferred post shapes: ${profile.preferred_post_shapes.join(", ") || "Not set"}`,
+    `Taboo patterns: ${profile.taboo_patterns || "Not set"}`,
+    `Why you belong: ${profile.why_you_belong || "Not set"}`,
+  ].join("\n");
+}
+
 function getArchetypeDirective(archetype: PostArchetype) {
   switch (archetype) {
     case "question":
@@ -182,6 +202,23 @@ function getSurfaceDirective(surfaceIntent: SurfaceIntent) {
     case "feed_post":
     default:
       return "Optimize for standalone feed readability.";
+  }
+}
+
+function getFormatDirective(postFormat: PostFormat | undefined) {
+  switch (postFormat) {
+    case "one_liner":
+      return "Prefer a single sharp line. Compress aggressively.";
+    case "question":
+      return "Prefer a direct question and keep it tight.";
+    case "multi_line_insight":
+      return "Prefer a compact multi-line insight with clean breaks.";
+    case "build_update":
+      return "Prefer a readable build-update structure with clear movement.";
+    case "reply_style":
+      return "Prefer a conversational timeline-native style that feels like a smart reply.";
+    default:
+      return "Choose the shortest structure that keeps the idea sharp.";
   }
 }
 
@@ -281,6 +318,7 @@ export function buildCandidateGenerationPrompt({
   seedIdea,
   targetArchetype,
   surfaceIntent,
+  postFormat,
   thesisCount = 4,
   draftCount = 3,
   liveTopicTitle,
@@ -290,8 +328,10 @@ ${seedIdea}
 
 Target post archetype: ${targetArchetype}
 Target surface intent: ${surfaceIntent}
+Target post format: ${postFormat || "auto"}
 Archetype directive: ${getArchetypeDirective(targetArchetype)}
 Surface directive: ${getSurfaceDirective(surfaceIntent)}
+Format directive: ${getFormatDirective(postFormat)}
 ${liveTopicTitle ? `Live topic context: ${liveTopicTitle}` : ""}
 
 Return JSON only with this shape:
@@ -310,6 +350,7 @@ Rules:
 - Generate ${thesisCount} theses and ${draftCount} tweet candidates.
 - Every thesis must be a distinct angle.
 - Every candidate draft must be under 280 characters.
+- Single-line and single-sentence drafts are valid and often preferable for questions, hard statements, counterintuitive takes, and some proof posts.
 - Match the target archetype and surface, not just the topic.
 - "why_it_fits" should explain why the draft matches the user's worldview or taste, not why it sounds clever.`;
 }
@@ -467,6 +508,7 @@ export function buildStartupCandidateGenerationPrompt({
   seedIdea,
   targetArchetype,
   surfaceIntent,
+  postFormat,
   thesisCount = 4,
   draftCount = 3,
   liveTopicTitle,
@@ -476,8 +518,10 @@ ${seedIdea}
 
 Target post archetype: ${targetArchetype}
 Target surface intent: ${surfaceIntent}
+Target post format: ${postFormat || "auto"}
 Archetype directive: ${getArchetypeDirective(targetArchetype)}
 Surface directive: ${getSurfaceDirective(surfaceIntent)}
+Format directive: ${getFormatDirective(postFormat)}
 ${liveTopicTitle ? `Live topic context: ${liveTopicTitle}` : ""}
 
 Return JSON only with this shape:
@@ -496,6 +540,7 @@ Rules:
 - Generate ${thesisCount} theses and ${draftCount} tweet candidates.
 - Favor distinct startup communication angles such as problem clarity, customer transformation, objection handling, proof, and positioning.
 - Every draft must be under 280 characters.
+- Single-line drafts are valid when they are sharper than a multi-line version.
 - Match the target archetype and surface, not just the startup topic.
 - "why_it_fits" must explain why the draft helps broader people understand the startup while still fitting the user's worldview.`;
 }
@@ -538,6 +583,7 @@ export function buildConversationGenerationSystemPrompt(params: {
   draftKind: DraftKind;
   conversationContext: string;
   companyImageProfile: CompanyImageProfile | null;
+  communityProfile?: CommunityProfile | null;
   narrativePillars?: NarrativePillar[];
   proofAssets?: ProofAsset[];
   sharedMindModel?: MindModelEntry[];
@@ -553,6 +599,10 @@ Your mission is to write a ${actionLabel} that helps the account win qualified r
 <company_image>
 ${formatCompanyImageProfile(params.companyImageProfile)}
 </company_image>
+
+<community_profile>
+${formatCommunityProfile(params.communityProfile)}
+</community_profile>
 
 <narrative_pillars>
 ${formatNarrativePillars(params.narrativePillars)}
@@ -592,10 +642,138 @@ CRITICAL INSTRUCTIONS:
 7. If promotion would feel forced, do not force it; earn relevance first.`;
 }
 
+export function buildCommunityOriginalGenerationSystemPrompt(params: {
+  communityProfile: CommunityProfile;
+  companyImageProfile: CompanyImageProfile | null;
+  narrativePillars?: NarrativePillar[];
+  proofAssets?: ProofAsset[];
+  sharedMindModel?: MindModelEntry[];
+  buildContext?: string;
+  recentDistributionDrafts?: string;
+  distributionSignals?: string[];
+}) {
+  return `You are writing a highly community-native X post for a specific audience cluster.
+Your mission is to write a post that feels like it belongs inside the named community while still helping the user's company image.
+
+<community_profile>
+${formatCommunityProfile(params.communityProfile)}
+</community_profile>
+
+<company_image>
+${formatCompanyImageProfile(params.companyImageProfile)}
+</company_image>
+
+<narrative_pillars>
+${formatNarrativePillars(params.narrativePillars)}
+</narrative_pillars>
+
+<proof_library>
+${formatProofAssets(params.proofAssets)}
+</proof_library>
+
+<shared_worldview>
+${formatMindModelEntries(params.sharedMindModel)}
+</shared_worldview>
+
+<build_context>
+${params.buildContext || "None"}
+</build_context>
+
+<recent_distribution_drafts_do_not_repeat>
+${params.recentDistributionDrafts || "None"}
+</recent_distribution_drafts_do_not_repeat>
+
+<distribution_learning>
+${formatStringList(params.distributionSignals)}
+</distribution_learning>
+
+CRITICAL INSTRUCTIONS:
+1. Write for the named community, not for generic X.
+2. Match the room's level of specificity, tone, and topic depth.
+3. Make the user sound like they genuinely belong there.
+4. Tie back to company image, product learning, customer pain, proof, or founder belief when relevant.
+5. Avoid taboo patterns from the community profile.
+6. Keep it under 280 characters.
+7. Do not turn this into a vague motivational post.`;
+}
+
+export function buildCommunityOriginalCandidatePrompt(params: {
+  communityName: string;
+  topicHints: string[];
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+  postFormat?: PostFormat;
+  thesisCount?: number;
+  draftCount?: number;
+}) {
+  return `Target community: ${params.communityName}
+Topic hints: ${params.topicHints.join(", ") || "None"}
+Target archetype: ${params.targetArchetype}
+Target surface intent: ${params.surfaceIntent}
+Target post format: ${params.postFormat || "auto"}
+Archetype directive: ${getArchetypeDirective(params.targetArchetype)}
+Surface directive: ${getSurfaceDirective(params.surfaceIntent)}
+Format directive: ${getFormatDirective(params.postFormat)}
+
+Return JSON only with this shape:
+{
+  "theses": ["...", "..."],
+  "candidates": [
+    {
+      "thesis": "...",
+      "draft": "...",
+      "why_it_fits": "..."
+    }
+  ]
+}
+
+Rules:
+- Generate ${params.thesisCount || 3} theses and ${params.draftCount || 3} candidates.
+- Each candidate must feel specific to the target community.
+- Keep each draft under 280 characters.
+- One-line or one-sentence drafts are valid when that matches the community's style.
+- why_it_fits should explain why the post belongs in that community and still helps company image.`;
+}
+
+export function buildCommunityOriginalCriticPrompt(params: {
+  candidatesJson: string;
+  communityName: string;
+  targetArchetype: PostArchetype;
+  surfaceIntent: SurfaceIntent;
+}) {
+  return `You are a strict community-fit critic for X.
+Rank the candidates by how likely they are to feel native, useful, and credible inside ${params.communityName}.
+
+Evaluate each candidate on:
+- native fit to the community
+- specificity
+- credibility
+- company-image usefulness
+- authenticity
+- how well it executes the requested archetype: ${params.targetArchetype}
+- how well it fits the requested surface intent: ${params.surfaceIntent}
+
+Return JSON only:
+{
+  "selected_index": 0,
+  "ranked": [
+    {
+      "draft_index": 0,
+      "score": 91,
+      "reason": "..."
+    }
+  ]
+}
+
+Candidates:
+${params.candidatesJson}`;
+}
+
 export function buildConversationCandidatePrompt(params: {
   draftKind: DraftKind;
   targetArchetype: PostArchetype;
   surfaceIntent: SurfaceIntent;
+  postFormat?: PostFormat;
   conversationText: string;
   thesisCount?: number;
   draftCount?: number;
@@ -606,8 +784,10 @@ ${params.conversationText}
 Draft kind: ${params.draftKind}
 Target archetype: ${params.targetArchetype}
 Target surface intent: ${params.surfaceIntent}
+Target post format: ${params.postFormat || "auto"}
 Archetype directive: ${getArchetypeDirective(params.targetArchetype)}
 Surface directive: ${getSurfaceDirective(params.surfaceIntent)}
+Format directive: ${getFormatDirective(params.postFormat)}
 
 Return JSON only with this shape:
 {
@@ -627,6 +807,7 @@ Rules:
 - For quote posts, write as if you are using the source as a live prompt for your own angle.
 - Do not use hashtags or emojis.
 - Keep every draft under 280 characters.
+- One-line replies and one-sentence quote posts are valid when they feel sharper and more native.
 - why_it_fits should explain why the draft helps qualified reach and company image.`;
 }
 

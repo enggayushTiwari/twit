@@ -24,8 +24,11 @@ CREATE TABLE IF NOT EXISTS generated_tweets (
   status text NOT NULL DEFAULT 'PENDING',
   generation_mode text NOT NULL DEFAULT 'general',
   draft_kind text NOT NULL DEFAULT 'original_post',
+  post_format text,
   pillar_label text,
   source_conversation_id uuid,
+  community_profile_id uuid,
+  community_label text,
   theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   rationale text NOT NULL DEFAULT '',
@@ -40,8 +43,11 @@ ALTER TABLE generated_tweets
   ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'PENDING',
   ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'general',
   ADD COLUMN IF NOT EXISTS draft_kind text NOT NULL DEFAULT 'original_post',
+  ADD COLUMN IF NOT EXISTS post_format text,
   ADD COLUMN IF NOT EXISTS pillar_label text,
   ADD COLUMN IF NOT EXISTS source_conversation_id uuid,
+  ADD COLUMN IF NOT EXISTS community_profile_id uuid,
+  ADD COLUMN IF NOT EXISTS community_label text,
   ADD COLUMN IF NOT EXISTS theses jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS alternates jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '',
@@ -106,6 +112,25 @@ BEGIN
           'customer_pain_bridge',
           'proof_backed_response',
           'light_witty_response'
+        )
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'generated_tweets_post_format_check'
+  ) THEN
+    ALTER TABLE generated_tweets
+      ADD CONSTRAINT generated_tweets_post_format_check
+      CHECK (
+        post_format IS NULL OR
+        post_format IN (
+          'one_liner',
+          'question',
+          'multi_line_insight',
+          'build_update',
+          'reply_style'
         )
       );
   END IF;
@@ -476,10 +501,41 @@ CREATE TABLE IF NOT EXISTS target_accounts (
   created_at timestamp with time zone DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS community_profiles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  slug text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  audience_focus text NOT NULL DEFAULT 'mixed',
+  tone_rules text NOT NULL DEFAULT '',
+  common_topics jsonb NOT NULL DEFAULT '[]'::jsonb,
+  preferred_post_shapes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  taboo_patterns text NOT NULL DEFAULT '',
+  why_you_belong text NOT NULL DEFAULT '',
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'community_profiles_audience_focus_check'
+  ) THEN
+    ALTER TABLE community_profiles
+      ADD CONSTRAINT community_profiles_audience_focus_check
+      CHECK (audience_focus IN ('builders', 'customers', 'mixed'));
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS conversation_opportunities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_type text NOT NULL DEFAULT 'manual_paste',
   source_url text,
+  community_profile_id uuid,
+  community_label text,
   author_handle text,
   author_name text,
   content text NOT NULL,
@@ -490,6 +546,21 @@ CREATE TABLE IF NOT EXISTS conversation_opportunities (
   raw_input text NOT NULL DEFAULT '',
   created_at timestamp with time zone DEFAULT now()
 );
+
+ALTER TABLE conversation_opportunities
+  ADD COLUMN IF NOT EXISTS source_type text NOT NULL DEFAULT 'manual_paste',
+  ADD COLUMN IF NOT EXISTS source_url text,
+  ADD COLUMN IF NOT EXISTS community_profile_id uuid,
+  ADD COLUMN IF NOT EXISTS community_label text,
+  ADD COLUMN IF NOT EXISTS author_handle text,
+  ADD COLUMN IF NOT EXISTS author_name text,
+  ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS topic_tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS why_it_matters text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS recommended_action text NOT NULL DEFAULT 'reply',
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'new',
+  ADD COLUMN IF NOT EXISTS raw_input text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
 
 DO $$
 BEGIN
@@ -531,6 +602,24 @@ ALTER TABLE generated_tweets
   ADD CONSTRAINT generated_tweets_source_conversation_id_fkey
   FOREIGN KEY (source_conversation_id)
   REFERENCES conversation_opportunities(id)
+  ON DELETE SET NULL;
+
+ALTER TABLE generated_tweets
+  DROP CONSTRAINT IF EXISTS generated_tweets_community_profile_id_fkey;
+
+ALTER TABLE generated_tweets
+  ADD CONSTRAINT generated_tweets_community_profile_id_fkey
+  FOREIGN KEY (community_profile_id)
+  REFERENCES community_profiles(id)
+  ON DELETE SET NULL;
+
+ALTER TABLE conversation_opportunities
+  DROP CONSTRAINT IF EXISTS conversation_opportunities_community_profile_id_fkey;
+
+ALTER TABLE conversation_opportunities
+  ADD CONSTRAINT conversation_opportunities_community_profile_id_fkey
+  FOREIGN KEY (community_profile_id)
+  REFERENCES community_profiles(id)
   ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS distribution_outcomes (
@@ -579,6 +668,7 @@ ALTER TABLE company_image_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE narrative_pillars ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proof_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE target_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversation_opportunities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE distribution_outcomes ENABLE ROW LEVEL SECURITY;
 
@@ -644,6 +734,9 @@ CREATE POLICY "Allow all access to proof_assets" ON proof_assets FOR ALL TO publ
 
 DROP POLICY IF EXISTS "Allow all access to target_accounts" ON target_accounts;
 CREATE POLICY "Allow all access to target_accounts" ON target_accounts FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all access to community_profiles" ON community_profiles;
+CREATE POLICY "Allow all access to community_profiles" ON community_profiles FOR ALL TO public USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow all access to conversation_opportunities" ON conversation_opportunities;
 CREATE POLICY "Allow all access to conversation_opportunities" ON conversation_opportunities FOR ALL TO public USING (true) WITH CHECK (true);
